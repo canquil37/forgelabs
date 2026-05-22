@@ -667,8 +667,11 @@
       this.view = name;
       document.getElementById('gallery-view').classList.toggle('active', name === 'gallery');
       document.getElementById('workstation-view').classList.toggle('active', name === 'workstation');
+      document.getElementById('library-view').classList.toggle('active', name === 'library');
       document.body.classList.toggle('in-workstation', name === 'workstation');
       document.body.classList.toggle('in-gallery', name === 'gallery');
+      document.body.classList.toggle('in-library', name === 'library');
+      document.getElementById('library-btn').classList.toggle('active', name === 'library');
     },
 
     backToGallery() {
@@ -708,7 +711,19 @@
 
       document.getElementById('back-to-gallery').onclick = () => this.backToGallery();
       document.getElementById('export-btn').onclick = () => this.openExport();
+      document.getElementById('save-preset-btn').onclick = () => this.openSaveModal();
       document.getElementById('help-btn').onclick = () => document.getElementById('help').classList.add('open');
+      document.getElementById('library-btn').onclick = () => this.openLibrary();
+      document.getElementById('library-back').onclick = () => this.backToGallery();
+      this.refreshLibraryBadge();
+
+      // Save modal wiring
+      document.getElementById('save-close').onclick = () => this.closeSaveModal();
+      document.getElementById('save-cancel').onclick = () => this.closeSaveModal();
+      document.getElementById('save-confirm').onclick = () => this.confirmSave();
+      document.getElementById('save-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'save-modal') this.closeSaveModal();
+      });
     },
 
     bindKeyboard() {
@@ -723,7 +738,13 @@
             if (schema) this.randomize(this.activeId, schema);
           } else if (e.key === 'e' || e.key === 'E') {
             this.openExport();
+          } else if (e.key === 's' || e.key === 'S') {
+            this.openSaveModal();
           }
+        }
+        if (this.view === 'library' && e.key === 'Escape') this.backToGallery();
+        if (e.key === 'l' || e.key === 'L') {
+          if (this.view === 'library') this.backToGallery(); else this.openLibrary();
         }
         if (e.key === '?' || (e.shiftKey && e.key === '/')) {
           document.getElementById('help').classList.toggle('open');
@@ -731,8 +752,187 @@
         if (e.key === 'Escape') {
           document.getElementById('help').classList.remove('open');
           document.getElementById('export-modal').classList.remove('open');
+          document.getElementById('save-modal').classList.remove('open');
         }
       });
+    },
+
+    // ═══════════════════════════════════════════════════════════════════
+    // LIBRARY  —  save presets, list them, send to TUNIX
+    // ═══════════════════════════════════════════════════════════════════
+
+    refreshLibraryBadge() {
+      const n = window.ForgeLabsLibrary.list().length;
+      const el = document.getElementById('library-count');
+      el.textContent = n > 0 ? String(n) : '';
+      el.classList.toggle('has', n > 0);
+    },
+
+    openLibrary() {
+      this.setView('library');
+      this.renderLibrary();
+    },
+
+    renderLibrary() {
+      const grid = document.getElementById('library-grid');
+      const items = window.ForgeLabsLibrary.list();
+      const hint = document.getElementById('library-empty-hint');
+      hint.classList.toggle('show', items.length === 0);
+      grid.innerHTML = '';
+      items.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'preset-card';
+        const fam = (window.FORGELABS_TUNABLE.FAMILY[p.shaderId] || '').toUpperCase();
+        const date = new Date(p.createdAt).toLocaleDateString('es-CL', { day:'2-digit', month:'2-digit', year:'2-digit' });
+        const time = new Date(p.createdAt).toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' });
+        card.innerHTML = `
+          <img class="preset-thumb" src="${p.thumbnail || ''}" alt="${p.name}"/>
+          <div class="preset-body">
+            <div class="preset-name">${escapeHtml(p.name)}</div>
+            ${p.note ? `<div class="preset-note">${escapeHtml(p.note)}</div>` : ''}
+            <div class="preset-row">
+              <span class="fam">${escapeHtml(p.shaderId)}${fam ? ' · ' + fam : ''}</span>
+              <span>${date} · ${time}</span>
+              ${p.code ? `<span class="preset-code">${p.code}</span>` : ''}
+            </div>
+          </div>
+          <div class="preset-actions">
+            <button data-act="open">▶ Open</button>
+            <button data-act="copy">📋 ${p.code ? 'Copy code' : 'Copy JSON'}</button>
+            <button class="send" data-act="send">${p.code ? '🔁 Re-send' : '📤 Send to TUNIX'}</button>
+            <button class="danger" data-act="delete">🗑 Delete</button>
+            <button data-act="export">↗ Export</button>
+          </div>
+        `;
+        card.querySelectorAll('button[data-act]').forEach(btn => {
+          btn.onclick = () => this.libraryAction(btn.dataset.act, p);
+        });
+        grid.appendChild(card);
+      });
+    },
+
+    async libraryAction(act, preset) {
+      if (act === 'open') {
+        // Apply preset to its shader, then open workstation
+        const sid = preset.shaderId;
+        const schema = SCHEMAS[sid];
+        if (schema && preset.params) {
+          this.paramState[sid] = { ...schema.defaults, ...preset.params };
+          localStorage.setItem(LS_PREFIX + sid + '.config', JSON.stringify(this.paramState[sid]));
+        }
+        if (preset.global) {
+          GLOBAL.mood = preset.global.mood ?? GLOBAL.mood;
+          GLOBAL.lens = preset.global.lens ?? GLOBAL.lens;
+          GLOBAL.tempo = preset.global.tempo ?? GLOBAL.tempo;
+          saveGlobal();
+          document.getElementById('mood').value = GLOBAL.mood;
+          document.getElementById('lens').value = GLOBAL.lens;
+          document.getElementById('tempo').value = GLOBAL.tempo;
+          document.getElementById('tempo-val').textContent = GLOBAL.tempo.toFixed(2) + '×';
+        }
+        this.openWorkstation(sid);
+      } else if (act === 'copy') {
+        const text = preset.code
+          ? preset.code
+          : JSON.stringify({
+              forgelabs: 1,
+              shader: preset.shaderId,
+              global: preset.global,
+              params: preset.params,
+            }, null, 2);
+        navigator.clipboard.writeText(text);
+        toast(preset.code ? `Copied ${preset.code}` : 'Copied JSON', preset.code ? 'code' : '');
+      } else if (act === 'send') {
+        try {
+          toast('Sending to TUNIX…');
+          const updated = await window.ForgeLabsLibrary.sendToTunix(preset);
+          this.renderLibrary();
+          this.refreshLibraryBadge();
+          // Auto-copy the code for instant share
+          navigator.clipboard.writeText(updated.code).catch(()=>{});
+          toast(`Sent ✓  ${updated.code}  (copiado al portapapeles)`, 'code');
+        } catch (err) {
+          console.error(err);
+          toast('Send failed: ' + (err.message || err));
+        }
+      } else if (act === 'delete') {
+        if (!confirm(`Borrar preset "${preset.name}"? (queda en Supabase si ya lo enviaste)`)) return;
+        window.ForgeLabsLibrary.remove(preset.id);
+        this.refreshLibraryBadge();
+        this.renderLibrary();
+      } else if (act === 'export') {
+        // Quick export from library: load and open export modal
+        this.activeId = preset.shaderId;
+        const schema = SCHEMAS[preset.shaderId];
+        if (schema && preset.params) {
+          this.paramState[preset.shaderId] = { ...schema.defaults, ...preset.params };
+        }
+        if (preset.global) {
+          GLOBAL.mood = preset.global.mood ?? GLOBAL.mood;
+          GLOBAL.lens = preset.global.lens ?? GLOBAL.lens;
+          GLOBAL.tempo = preset.global.tempo ?? GLOBAL.tempo;
+        }
+        this.openExport();
+      }
+    },
+
+    // ─── Save modal ───────────────────────────────────────────────────
+    openSaveModal() {
+      if (!this.activeId) return;
+      const wp = WALLPAPERS.find(w => w.id === this.activeId);
+      // Capture thumbnail from the live canvas
+      const canvas = document.querySelector('#stage canvas');
+      let thumbnail = '';
+      if (canvas) {
+        try {
+          // Downscale to ~256x160 by drawing into an offscreen canvas
+          const small = document.createElement('canvas');
+          small.width = 320; small.height = 200;
+          small.getContext('2d').drawImage(canvas, 0, 0, small.width, small.height);
+          thumbnail = small.toDataURL('image/jpeg', 0.78);
+        } catch (e) {
+          console.warn('thumbnail capture failed', e);
+        }
+      }
+      this.pendingSave = {
+        shaderId: this.activeId,
+        params: this.paramState[this.activeId] || null,
+        global: { mood: GLOBAL.mood, lens: GLOBAL.lens, tempo: GLOBAL.tempo },
+        thumbnail,
+      };
+      document.getElementById('save-preview').src = thumbnail || '';
+      const stamp = new Date().toISOString().slice(0, 10);
+      document.getElementById('save-name').value = `${wp.name} ${stamp}`;
+      document.getElementById('save-note').value = '';
+      document.getElementById('save-meta').textContent =
+        `Shader: ${wp.name} · Mood ${GLOBAL.mood} · Lens ${GLOBAL.lens} · Tempo ${GLOBAL.tempo.toFixed(2)}×`;
+      document.getElementById('save-modal').classList.add('open');
+      setTimeout(() => document.getElementById('save-name').focus(), 60);
+    },
+
+    closeSaveModal() {
+      document.getElementById('save-modal').classList.remove('open');
+      this.pendingSave = null;
+    },
+
+    confirmSave() {
+      const ps = this.pendingSave;
+      if (!ps) return;
+      const name = document.getElementById('save-name').value.trim() || 'Untitled preset';
+      const note = document.getElementById('save-note').value.trim();
+      const preset = {
+        id: `${ps.shaderId}-${Date.now()}`,
+        name, note,
+        shaderId: ps.shaderId,
+        params: ps.params,
+        global: ps.global,
+        thumbnail: ps.thumbnail,
+        createdAt: new Date().toISOString(),
+      };
+      window.ForgeLabsLibrary.save(preset);
+      this.refreshLibraryBadge();
+      this.closeSaveModal();
+      toast('Saved to Library ✓');
     },
 
     // ─── Help ─────────────────────────────────────────────────────────
@@ -953,12 +1153,18 @@ export default function ${name}Background() {
   };
 
   // ─── Toast helper ────────────────────────────────────────────────
-  function toast(msg) {
+  function toast(msg, extraClass) {
     const t = document.getElementById('toast');
     t.textContent = msg;
-    t.classList.add('show');
+    // Reset + apply
+    t.className = 'toast' + (extraClass ? ' ' + extraClass : '') + ' show';
     clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => t.classList.remove('show'), 1600);
+    const dur = extraClass === 'code' ? 4200 : 1800;
+    toast._timer = setTimeout(() => { t.className = 'toast' + (extraClass ? ' ' + extraClass : ''); }, dur);
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   }
 
   document.addEventListener('DOMContentLoaded', () => App.init());

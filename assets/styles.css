@@ -646,3 +646,232 @@ details.sec[open] summary::before { transform: rotate(90deg); }
 
 /* Only show the Back button when the workstation view is active */
 body.in-workstation .ws-back { display: inline-flex; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Library button in topbar + count badge
+   ═══════════════════════════════════════════════════════════════════════════ */
+.topbar-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,208,156,0.06);
+  border: 1px solid rgba(255,208,156,0.20);
+  color: var(--gold);
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.topbar-btn:hover { background: rgba(255,208,156,0.18); border-color: rgba(255,208,156,0.45); color: #fff7e3; }
+.topbar-btn.active { background: rgba(255,208,156,0.22); border-color: rgba(255,208,156,0.65); }
+.count-badge {
+  display: none;
+  min-width: 18px; height: 18px;
+  align-items: center; justify-content: center;
+  padding: 0 5px;
+  background: var(--gold);
+  color: #1a0f08;
+  font-weight: 800;
+  font-size: 10px;
+  border-radius: 999px;
+  margin-left: 2px;
+}
+.count-badge.has { display: inline-flex; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Workstation — stack of action buttons (Save + Export)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ws-fab-stack {
+  position: absolute;
+  right: 360px; bottom: 18px;
+  z-index: 5;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+}
+@media (max-width: 760px) {
+  .ws-fab-stack { right: 14px; bottom: 60vh; }
+}
+.fab-action {
+  padding: 8px 14px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  border-radius: 999px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.40);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Library view
+   ═══════════════════════════════════════════════════════════════════════════ */
+.library-title {
+  font-size: 13px;
+  letter-spacing: 0.20em;
+  color: var(--gold);
+}
+.library-empty-hint {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-left: 12px;
+  display: none;
+}
+.library-empty-hint.show { display: inline; }
+
+#library-view .toolbar {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; gap: 12px; align-items: center;
+  padding: 12px 16px;
+  background: rgba(7,6,10,0.90);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--panel-edge);
+  z-index: 11;
+  flex-wrap: wrap;
+}
+#library-stage {
+  position: absolute; top: 60px; right: 0; bottom: 0; left: 0;
+  overflow: auto;
+  padding: 16px;
+}
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+.preset-card {
+  background: rgba(20,14,8,0.55);
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  transition: border-color var(--t-fast), transform var(--t-fast);
+}
+.preset-card:hover { border-color: rgba(255,208,156,0.40); transform: translateY(-2px); }
+.preset-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: #000;
+  object-fit: cover;
+  display: block;
+}
+.preset-body {
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.preset-name {
+  font-weight: 700;
+  color: #fff4dd;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.preset-note {
+  font-size: 10px;
+  color: var(--ink-dim);
+  line-height: 1.35;
+  word-wrap: break-word;
+}
+.preset-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 9px;
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.preset-row .fam {
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,208,156,0.18); color: var(--gold);
+  font-weight: 700;
+}
+.preset-code {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--gold);
+  background: rgba(255,208,156,0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.08em;
+}
+.preset-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid var(--panel-edge);
+}
+.preset-actions button {
+  font-size: 10px;
+  padding: 6px 8px;
+  letter-spacing: 0.06em;
+}
+.preset-actions .send {
+  background: rgba(255,208,156,0.20);
+  border-color: rgba(255,208,156,0.50);
+  color: #fff7e3;
+  grid-column: 1 / -1;
+}
+.preset-actions .danger {
+  color: var(--danger);
+  border-color: rgba(255,122,110,0.30);
+}
+.preset-actions .danger:hover {
+  background: rgba(255,122,110,0.12);
+  border-color: rgba(255,122,110,0.55);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Save modal
+   ═══════════════════════════════════════════════════════════════════════════ */
+.save-form {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+}
+@media (max-width: 600px) {
+  .save-form { grid-template-columns: 1fr; }
+}
+.save-preview-wrap {
+  background: #000;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--panel-edge);
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+}
+.save-preview-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.save-fields {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.save-fields label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+}
+.save-fields input {
+  background: rgba(255,208,156,0.04);
+  border: 1px solid var(--panel-edge);
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  outline: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.save-fields input:focus { border-color: rgba(255,208,156,0.45); }
+.save-meta {
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+}
+
+/* Code copy toast — bigger so user can read the code */
+.toast.code {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  padding: 14px 22px;
+  background: rgba(255,208,156,0.20);
+  border-color: rgba(255,208,156,0.55);
+  color: #fff7e3;
+}
