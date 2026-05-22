@@ -60,8 +60,12 @@
   <section id="workstation-view" class="view">
     <div id="stage">
       <div class="ws-overlay">
+        <button id="back-to-gallery" class="ws-back" title="Volver a la galería (Esc)">
+          <span class="arrow">←</span>
+          <span>Gallery</span>
+          <span class="kbd">ESC</span>
+        </button>
         <div class="ws-info">
-          <button id="back-to-gallery" class="ghost" title="Esc">←</button>
           <span class="name" id="ws-name">—</span>
           <span class="fam" id="ws-family">—</span>
           <span class="meta" id="ws-meta"></span>
@@ -80,6 +84,33 @@
 
   <div id="intro-fade" class="intro-fade"></div>
 
+</div>
+
+<!-- ── Intro splash ── -->
+<div id="splash" class="splash">
+  <div class="splash-inner">
+    <svg class="splash-bolt" viewBox="0 0 192 192" width="160" height="160" aria-hidden="true">
+      <defs>
+        <filter id="bolt-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3.5" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      <polygon points="108,16 68,100 96,100 84,176 132,88 104,88"
+               class="bolt-fill"
+               filter="url(#bolt-glow)"/>
+      <polygon points="108,16 68,100 96,100 84,176 132,88 104,88"
+               class="bolt-stroke"/>
+    </svg>
+    <div class="splash-wordmark">
+      <span>FORGE</span><span class="splash-dot">·</span><span>LABS</span>
+    </div>
+    <div class="splash-tag">EFFECTS LABORATORY</div>
+    <button class="splash-skip" id="splash-skip" aria-label="Skip intro">SKIP</button>
+  </div>
 </div>
 
 <!-- ── Export modal ── -->
@@ -124,6 +155,28 @@
 
 <!-- ── Toast ── -->
 <div id="toast" class="toast"></div>
+
+<!-- ── Intro splash controller ── -->
+<script>
+(function(){
+  var splash = document.getElementById('splash');
+  if (!splash) return;
+  var SKIP_KEYS = { Escape:1, Enter:1, ' ':1, Spacebar:1 };
+  var done = false;
+  function dismiss(skip){
+    if (done) return; done = true;
+    splash.classList.add(skip ? 'skipped' : 'finishing');
+    var ms = skip ? 220 : 360;
+    setTimeout(function(){ splash.classList.add('gone'); document.removeEventListener('keydown', onKey, true); }, ms);
+  }
+  function onKey(e){ if (SKIP_KEYS[e.key]) { e.stopPropagation(); dismiss(true); } }
+  document.getElementById('splash-skip').addEventListener('click', function(e){ e.stopPropagation(); dismiss(true); });
+  splash.addEventListener('click', function(){ dismiss(true); });
+  document.addEventListener('keydown', onKey, true);
+  // Auto-dismiss after the CSS animation completes (1.5s total).
+  setTimeout(function(){ dismiss(false); }, 1500);
+})();
+</script>
 
 <!-- ── Scripts ── -->
 <script src="shaders.js"></script>
