@@ -406,13 +406,19 @@
                || wp.meta.toLowerCase().includes(q)
                || (FAMILY[wp.id] || '').toLowerCase().includes(q);
         }
-        el.style.display = match ? '' : 'none';
+        // Explicit display values (avoid '' fallback issues across browsers/states)
+        el.style.display = match ? 'block' : 'none';
         if (match) {
           this.filteredIds.push(wp.id);
           tiles.push({ id: wp.id, el, timeBias: wp.id.charCodeAt(0) * 0.31 });
         }
       });
-      if (this.dock) this.dock.setTiles(tiles);
+      // Force reflow so the grid lays out the newly-visible tiles BEFORE the
+      // dock renderer reads getBoundingClientRect on the next frame.
+      void grid.offsetHeight;
+      // Defer setTiles to next frame so layout has fully settled.
+      const self = this;
+      requestAnimationFrame(() => { if (self.dock) self.dock.setTiles(tiles); });
     },
 
     startGalleryLoop() {

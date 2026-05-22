@@ -608,23 +608,29 @@ details.sec[open] summary::before { transform: rotate(90deg); }
    Workstation — prominent back button + visible Esc hint
    ═══════════════════════════════════════════════════════════════════════════ */
 .ws-back {
+  position: fixed;
+  top: 60px;
+  left: 14px;
+  z-index: 80;
   display: inline-flex; align-items: center; gap: 8px;
-  background: var(--panel);
-  border: 1px solid rgba(255,208,156,0.30);
+  background: rgba(20,14,8,0.92);
+  border: 1px solid rgba(255,208,156,0.55);
   color: var(--gold);
-  padding: 7px 12px 7px 10px;
+  padding: 9px 14px 9px 12px;
   border-radius: 999px;
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.10em;
-  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
   cursor: pointer;
   backdrop-filter: blur(22px) saturate(140%);
   transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast), color var(--t-fast);
   text-transform: uppercase;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.30);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.40);
 }
-.ws-back:hover { background: rgba(255,208,156,0.22); border-color: rgba(255,208,156,0.55); color: #fff7e3; transform: translateX(-2px); }
+.ws-back:hover { background: rgba(255,208,156,0.30); border-color: rgba(255,208,156,0.80); color: #fff7e3; transform: translateX(-2px); }
+/* Hide the back button whenever workstation view is not active */
+#workstation-view:not(.active) .ws-back { display: none !important; }
 .ws-back:active { transform: translateX(-2px) scale(0.97); }
 .ws-back .arrow { font-size: 14px; line-height: 1; }
 .ws-back .kbd {
