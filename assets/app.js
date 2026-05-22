@@ -406,8 +406,10 @@
                || wp.meta.toLowerCase().includes(q)
                || (FAMILY[wp.id] || '').toLowerCase().includes(q);
         }
-        // Explicit display values (avoid '' fallback issues across browsers/states)
-        el.style.display = match ? 'block' : 'none';
+        // Toggle a class instead of setting style.display directly. Setting
+        // display:block on a grid item removes it from the grid layout in
+        // some browsers; using `.tile-hidden { display:none }` is safe.
+        el.classList.toggle('tile-hidden', !match);
         if (match) {
           this.filteredIds.push(wp.id);
           tiles.push({ id: wp.id, el, timeBias: wp.id.charCodeAt(0) * 0.31 });
@@ -665,6 +667,8 @@
       this.view = name;
       document.getElementById('gallery-view').classList.toggle('active', name === 'gallery');
       document.getElementById('workstation-view').classList.toggle('active', name === 'workstation');
+      document.body.classList.toggle('in-workstation', name === 'workstation');
+      document.body.classList.toggle('in-gallery', name === 'gallery');
     },
 
     backToGallery() {
