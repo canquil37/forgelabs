@@ -709,6 +709,7 @@
       document.getElementById('back-to-gallery').onclick = () => this.backToGallery();
       document.getElementById('export-btn').onclick = () => this.openExport();
       document.getElementById('save-preset-btn').onclick = () => this.openSaveModal();
+      document.getElementById('topbar-save-btn').onclick = () => this.openSaveModal();
       document.getElementById('help-btn').onclick = () => document.getElementById('help').classList.add('open');
       document.getElementById('library-btn').onclick = () => this.openLibrary();
       document.getElementById('library-back').onclick = () => this.backToGallery();

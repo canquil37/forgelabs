@@ -683,6 +683,16 @@ body.in-workstation .ws-back { display: inline-flex; }
 }
 .count-badge.has { display: inline-flex; }
 
+/* topbar Save button — only visible in Workstation */
+.topbar-save { display: none; }
+body.in-workstation .topbar-save { display: inline-flex; }
+.topbar-save {
+  background: rgba(255,208,156,0.18);
+  border-color: rgba(255,208,156,0.50);
+  color: #fff7e3;
+}
+.topbar-save:hover { background: rgba(255,208,156,0.32); border-color: rgba(255,208,156,0.80); }
+
 /* ═══════════════════════════════════════════════════════════════════════════
    Workstation — stack of action buttons (Save + Export)
    ═══════════════════════════════════════════════════════════════════════════ */
