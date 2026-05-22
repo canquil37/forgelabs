@@ -1826,6 +1826,382 @@ void main() {
 }
 `;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 24. MATRIX — falling green code rain. Click pulses bright wave.
+// ═══════════════════════════════════════════════════════════════════════════
+const MATRIX = `
+float digit(vec2 p, float seed) {
+  // procedural digit: just a hashed mask in cell
+  p = fract(p);
+  float h = hash21(floor(p * 5.0) + seed);
+  return step(0.55, h);
+}
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m = toAR(u_mouseSmooth);
+  // grid: columns falling
+  vec2 g = uv * vec2(50.0, 30.0);
+  vec2 gi = floor(g);
+  vec2 gf = fract(g);
+  // column-local time + offset
+  float colSeed = hash21(vec2(gi.x, 11.0));
+  float speed = 0.6 + colSeed * 1.6;
+  float yOff = u_time * speed * 1.4 + colSeed * 8.0;
+  float row = gi.y + yOff;
+  // cursor disturbance — bend columns away from cursor
+  float curseDist = length(uv - m);
+  float bend = exp(-curseDist * 3.0) * 0.6;
+  row += bend * sin(u_time * 2.0 + gi.x);
+
+  float lit = hash21(vec2(gi.x, floor(row)));
+  float head = smoothstep(0.93, 1.0, lit);          // rare bright head
+  float body = step(0.4, lit) * (0.30 + 0.50 * fract(lit * 13.0));
+  float bright = max(head * 1.3, body);
+
+  // digit mask
+  float d = digit(gf * 2.0, floor(row) + gi.x);
+  float v = d * bright;
+
+  // fade from top
+  v *= smoothstep(-0.55, 0.20, -uv.y);
+
+  vec3 baseCol = vec3(0.02, 0.30, 0.12);
+  vec3 hotCol  = vec3(0.55, 1.0, 0.65);
+  vec3 col = mix(vec3(0.0), baseCol, smoothstep(0.2, 0.8, v));
+  col = mix(col, hotCol, head);
+  // cursor halo
+  col += exp(-curseDist * 4.5) * vec3(0.10, 0.45, 0.20) * 0.6;
+  // click pulses
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 2.5) {
+        vec2 cp = toAR(ck.xy);
+        float rr = dt * 0.65;
+        float ring = exp(-pow((length(uv - cp) - rr) * 8.0, 2.0)) * exp(-dt * 0.6);
+        col += ring * vec3(0.6, 1.0, 0.7) * 1.5;
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.012;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 25. CRT — vintage CRT screen with scanlines, barrel curvature, RGB shift.
+// ═══════════════════════════════════════════════════════════════════════════
+const CRT = `
+vec3 sampleScene(vec2 p) {
+  // a slow color field that fills the screen
+  float f1 = fbm(p * 1.8 + u_time * 0.10);
+  float f2 = fbm(p * 2.6 - u_time * 0.08);
+  vec3 a = vec3(0.08, 0.04, 0.20);
+  vec3 b = vec3(0.85, 0.30, 0.70);
+  vec3 c = vec3(0.10, 0.85, 0.95);
+  vec3 col = mix(a, b, smoothstep(0.35, 0.70, f1));
+  col = mix(col, c, smoothstep(0.55, 0.85, f2) * 0.6);
+  return col;
+}
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m = toAR(u_mouseSmooth);
+
+  // barrel distortion
+  vec2 cc = uv;
+  float d2 = dot(cc, cc);
+  vec2 bent = cc * (1.0 + d2 * 0.18);
+
+  // cursor wobble
+  bent += (m - bent) * 0.03 * exp(-length(bent - m) * 2.0);
+
+  // RGB shift
+  float shift = 0.008;
+  vec3 col;
+  col.r = sampleScene(bent + vec2( shift, 0.0)).r;
+  col.g = sampleScene(bent).g;
+  col.b = sampleScene(bent + vec2(-shift, 0.0)).b;
+
+  // scanlines
+  float scan = 0.5 + 0.5 * sin(gl_FragCoord.y * 2.4);
+  col *= mix(0.75, 1.0, scan);
+
+  // phosphor grid
+  float gridx = 0.5 + 0.5 * sin(gl_FragCoord.x * 9.0);
+  col *= mix(0.92, 1.0, gridx);
+
+  // vignette
+  col *= 1.0 - smoothstep(0.6, 1.4, length(uv) * 1.05);
+
+  // noise
+  col += (hash21(gl_FragCoord.xy + u_time * 40.0) - 0.5) * 0.045;
+
+  // click flashes white briefly
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 0.6) {
+        float flash = exp(-dt * 8.0);
+        col += flash * 0.6;
+      }
+    }
+  }
+  // boot scan line
+  float roll = fract(u_time * 0.07);
+  col += smoothstep(0.02, 0.0, abs(fract(uv.y * 0.4 - roll) - 0.5)) * 0.05;
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 26. VORTEX — hypnotic concentric spiral. Cursor offsets center, click bursts.
+// ═══════════════════════════════════════════════════════════════════════════
+const VORTEX = `
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m = toAR(u_mouseSmooth);
+
+  // shift origin slowly toward cursor
+  vec2 center = m * 0.40;
+  vec2 p = uv - center;
+
+  float r = length(p);
+  float a = atan(p.y, p.x);
+
+  // spiral: bands depend on (a + k*log(r)) — log-polar
+  float k = 7.0;
+  float bands = sin(a * 4.0 + k * log(r + 0.05) - u_time * 1.4);
+
+  // smooth bands and add gentle noise
+  float n = fbm(vec2(a * 1.2, r * 4.0) + u_time * 0.15);
+  float t = 0.5 + 0.5 * bands * (0.7 + 0.3 * n);
+
+  vec3 c1 = vec3(0.02, 0.01, 0.10);
+  vec3 c2 = vec3(0.80, 0.15, 0.55);
+  vec3 c3 = vec3(0.20, 0.85, 1.00);
+  vec3 c4 = vec3(0.95, 0.95, 0.55);
+
+  vec3 col = mix(c1, c2, smoothstep(0.20, 0.55, t));
+  col = mix(col, c3, smoothstep(0.55, 0.80, t));
+  col = mix(col, c4, smoothstep(0.80, 0.95, t) * 0.7);
+
+  // radial darkening
+  col *= 1.0 - smoothstep(0.0, 1.2, r) * 0.35;
+
+  // center glow
+  col += exp(-r * 8.0) * vec3(1.0, 0.9, 0.7) * 0.6;
+
+  // clicks: radial pulses outward
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 3.0) {
+        vec2 cp = toAR(ck.xy) - center;
+        float rr = dt * 0.65;
+        float ring = exp(-pow((length(p - cp) - rr) * 8.0, 2.0)) * exp(-dt * 0.8);
+        col += ring * vec3(1.0, 0.85, 0.95) * 1.6;
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.010;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 27. CIRCUIT — animated PCB traces with light pulses traveling along them.
+// ═══════════════════════════════════════════════════════════════════════════
+const CIRCUIT = `
+float trace(vec2 p, float seed) {
+  // grid-based axis-aligned traces, with branches at hashed points
+  vec2 g = p * 8.0;
+  vec2 gi = floor(g);
+  vec2 gf = fract(g);
+  float h = hash21(gi + seed);
+  float w = 0.06;
+  // mostly horizontal or vertical depending on hash
+  if (h < 0.5) {
+    return smoothstep(w, w * 0.4, abs(gf.y - 0.5));
+  } else {
+    return smoothstep(w, w * 0.4, abs(gf.x - 0.5));
+  }
+}
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m = toAR(u_mouseSmooth);
+
+  float t1 = trace(uv, 0.0);
+  float t2 = trace(uv * 1.3 + vec2(0.7, 0.2), 1.0) * 0.7;
+  float lines = max(t1, t2);
+
+  // pads at intersection points (hash dots)
+  vec2 g = uv * 8.0;
+  vec2 gi = floor(g);
+  vec2 gf = fract(g);
+  float hp = hash21(gi);
+  float pad = step(0.85, hp) * smoothstep(0.18, 0.10, length(gf - 0.5));
+
+  // pulses moving along
+  float pulse = 0.5 + 0.5 * sin(u_time * 1.6 + uv.x * 6.0 + uv.y * 3.0);
+  pulse = pow(pulse, 6.0);
+
+  vec3 base = vec3(0.02, 0.05, 0.04);
+  vec3 traceCol = vec3(0.10, 0.55, 0.40);
+  vec3 hotCol = vec3(0.65, 1.0, 0.85);
+
+  vec3 col = base;
+  col += lines * mix(traceCol, hotCol, pulse) * 0.85;
+  col += pad * vec3(0.95, 1.0, 0.85);
+
+  // cursor light: brightens nearby traces
+  float cd = length(uv - m);
+  col += exp(-cd * 5.0) * vec3(0.50, 1.0, 0.85) * 0.5 * lines;
+
+  // click sends a wave from click point
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 3.0) {
+        vec2 cp = toAR(ck.xy);
+        float rr = dt * 0.5;
+        float ring = exp(-pow((length(uv - cp) - rr) * 9.0, 2.0)) * exp(-dt * 1.0);
+        col += ring * hotCol * 1.3 * lines;
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.012;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 28. OCEAN — moving waves with caustics, sun glare overhead.
+// ═══════════════════════════════════════════════════════════════════════════
+const OCEAN = `
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m = toAR(u_mouseSmooth);
+
+  // perspective: stretch y so distant waves are smaller
+  vec2 p = vec2(uv.x, uv.y * 1.6);
+  float depthMix = smoothstep(-0.5, 0.5, uv.y);
+
+  // multi-octave waves
+  float wave = 0.0;
+  float amp = 0.55;
+  vec2 q = p * 2.0;
+  for (int i = 0; i < 4; i++) {
+    wave += amp * sin(q.x * 1.3 + q.y * 0.7 + u_time * (0.5 + float(i)*0.3));
+    wave += amp * 0.7 * fbm(q + u_time * 0.18);
+    q *= 1.8;
+    amp *= 0.55;
+  }
+  float h = wave * 0.5;
+
+  // caustic shimmer
+  float caustic = pow(0.5 + 0.5 * sin(p.x * 6.0 + h * 4.0 + u_time * 2.0), 8.0);
+
+  vec3 deepCol = vec3(0.02, 0.05, 0.18);
+  vec3 midCol  = vec3(0.05, 0.30, 0.55);
+  vec3 crestCol= vec3(0.65, 0.85, 0.95);
+  vec3 sunCol  = vec3(1.0, 0.88, 0.55);
+
+  vec3 col = mix(deepCol, midCol, smoothstep(-0.6, 0.4, h));
+  col = mix(col, crestCol, smoothstep(0.30, 0.55, h));
+  col += caustic * vec3(0.4, 0.7, 0.85) * 0.5 * (1.0 - depthMix);
+
+  // sun glare from above (uv.y near top)
+  float sun = exp(-length(uv - vec2(m.x * 0.5, 0.55)) * 4.0);
+  col += sun * sunCol * 0.85;
+
+  // cursor leaves a wake
+  float ck = length(uv - m);
+  col += exp(-ck * 6.0) * vec3(0.55, 0.85, 1.0) * 0.45;
+
+  // click drops a ripple
+  for (int i = 0; i < 8; i++) {
+    vec4 cl = u_clicks[i];
+    if (cl.w > 0.5) {
+      float dt = u_time - cl.z;
+      if (dt > 0.0 && dt < 3.0) {
+        vec2 cp = toAR(cl.xy);
+        float rr = dt * 0.45;
+        float ring = exp(-pow((length(uv - cp) - rr) * 10.0, 2.0)) * exp(-dt * 0.85);
+        col += ring * vec3(0.85, 1.0, 1.0) * 1.0;
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.012;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 29. CURL FIELD — particles streaming along a curl-noise vector field.
+// ═══════════════════════════════════════════════════════════════════════════
+const CURL_FIELD = `
+vec2 curl(vec2 p) {
+  float e = 0.05;
+  float n1 = fbm(vec2(p.x, p.y + e));
+  float n2 = fbm(vec2(p.x, p.y - e));
+  float n3 = fbm(vec2(p.x + e, p.y));
+  float n4 = fbm(vec2(p.x - e, p.y));
+  return vec2(n1 - n2, n4 - n3) / (2.0 * e);
+}
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m = toAR(u_mouseSmooth);
+
+  // sample vector field at this point
+  vec2 v = curl(uv * 2.0 + u_time * 0.10);
+  float speed = length(v);
+
+  // streamline density: integrate noise back along the field direction
+  vec2 dir = normalize(v + 1e-4);
+  float streak = 0.0;
+  vec2 p = uv;
+  for (int i = 0; i < 14; i++) {
+    p -= dir * 0.018;
+    streak += fbm(p * 5.0 + u_time * 0.20) * 0.10;
+  }
+
+  vec3 c1 = vec3(0.02, 0.01, 0.06);
+  vec3 c2 = vec3(0.10, 0.50, 0.95);
+  vec3 c3 = vec3(0.95, 0.30, 0.65);
+  vec3 c4 = vec3(1.0, 0.95, 0.80);
+
+  vec3 col = c1;
+  col = mix(col, c2, smoothstep(0.30, 0.55, streak));
+  col = mix(col, c3, smoothstep(0.55, 0.75, streak) * 0.8);
+  col = mix(col, c4, smoothstep(0.75, 0.90, streak) * 0.4);
+
+  // cursor: pulls streams toward itself
+  float md = length(uv - m);
+  col += exp(-md * 5.5) * vec3(1.0, 0.95, 0.80) * 0.45;
+
+  // clicks: burst of new particles
+  for (int i = 0; i < 8; i++) {
+    vec4 cl = u_clicks[i];
+    if (cl.w > 0.5) {
+      float dt = u_time - cl.z;
+      if (dt > 0.0 && dt < 3.0) {
+        vec2 cp = toAR(cl.xy);
+        float rr = dt * 0.50;
+        float ring = exp(-pow((length(uv - cp) - rr) * 8.0, 2.0)) * exp(-dt * 0.85);
+        col += ring * c4 * 1.2;
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.010;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
 const WALLPAPERS = [
   { id: 'mercury',     name: 'Mercury',     meta: 'Liquid chrome — pools toward your cursor',          frag: MERCURY,
     swatch: 'radial-gradient(120% 120% at 30% 30%, #c8d4ff 0%, #5e6f9c 40%, #0a0d1a 100%)' },
@@ -1873,6 +2249,18 @@ const WALLPAPERS = [
     swatch: 'linear-gradient(120deg, #1a0e02 0%, #5c3f15 30%, #d4a73e 60%, #ffefb6 100%)' },
   { id: 'honey',       name: 'Honey',       meta: 'Liquid amber — click drips a drop downward',        frag: HONEY,
     swatch: 'radial-gradient(120% 120% at 50% 30%, #fce28a 0%, #c47a23 35%, #4d2106 70%, #0d0501 100%)' },
+  { id: 'matrix',      name: 'Matrix',      meta: 'Code rain falling — cursor bends columns',          frag: MATRIX,
+    swatch: 'linear-gradient(180deg, #020806 0%, #03301a 35%, #07a04a 75%, #b5ffcc 100%)' },
+  { id: 'crt',         name: 'CRT',         meta: 'Vintage tube — scanlines, RGB shift, glow',         frag: CRT,
+    swatch: 'radial-gradient(120% 120% at 50% 50%, #ff5fd0 0%, #623ce0 40%, #0a0420 80%, #02020c 100%)' },
+  { id: 'vortex',      name: 'Vortex',      meta: 'Hypnotic spiral — cursor offsets the eye',          frag: VORTEX,
+    swatch: 'conic-gradient(from 0deg at 50% 50%, #ffe88a, #ff3d99, #00d9ff, #ffe88a)' },
+  { id: 'circuit',     name: 'Circuit',     meta: 'PCB traces with light pulses — click sends a wave', frag: CIRCUIT,
+    swatch: 'linear-gradient(135deg, #02060a 0%, #0a3a2a 35%, #1fb888 65%, #c8ffe8 100%)' },
+  { id: 'ocean',       name: 'Ocean',       meta: 'Live waves with caustics + sun glare',              frag: OCEAN,
+    swatch: 'linear-gradient(180deg, #02050f 0%, #084c7a 40%, #aedceb 75%, #ffd07a 100%)' },
+  { id: 'curlfield',   name: 'Curl Field',  meta: 'Particle streams following a vector field',         frag: CURL_FIELD,
+    swatch: 'linear-gradient(120deg, #04040e 0%, #1a4dc8 40%, #d2358a 75%, #fff0bc 100%)' },
 ];
 
 window.WALLPAPERS = WALLPAPERS;
