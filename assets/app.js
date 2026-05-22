@@ -200,13 +200,33 @@
       this.programs = new Map();
       for (const wp of wallpapers) {
         try {
-          const src = SHADER_COMMON + wrapPostProcess(wp.frag);
+          // Use the tunable variant when available so the dock preview matches
+          // EXACTLY what the user sees on first open of the workstation.
+          const schema = SCHEMAS[wp.id] || null;
+          const fragSrc = schema ? schema.frag : wp.frag;
+          const src = SHADER_COMMON + wrapPostProcess(fragSrc);
           const prog = program(gl, src);
           gl.useProgram(prog);
           const aPos = gl.getAttribLocation(prog, 'a_pos');
           gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
           gl.enableVertexAttribArray(aPos);
           gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+          // Bind schema defaults to custom uniforms once (no need to update each frame).
+          if (schema) {
+            for (const [uniName, [type, key]] of Object.entries(schema.uniforms)) {
+              const loc = gl.getUniformLocation(prog, uniName);
+              if (!loc) continue;
+              const v = schema.defaults[key];
+              if (type === 'color') {
+                const c = hex3(v);
+                gl.uniform3f(loc, c[0], c[1], c[2]);
+              } else if (type === 'float') {
+                gl.uniform1f(loc, Number(v) || 0);
+              }
+            }
+          }
+
           this.programs.set(wp.id, {
             prog, aPos,
             loc: {

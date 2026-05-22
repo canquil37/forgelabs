@@ -2202,6 +2202,404 @@ void main() {
 }
 `;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 30. LIGHTNING ⚡  Procedural bolt with branches, periodic strikes toward cursor.
+// ═══════════════════════════════════════════════════════════════════════════
+const LIGHTNING = `
+float sdSeg(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+// Distance from point to a procedurally-generated bolt anchored at (top -> target).
+// Bolt has 'segs' segments with horizontal jitter from hash21(i + seed).
+float boltDist(vec2 p, vec2 target, float seed) {
+  float d = 1e6;
+  vec2 prev = vec2(target.x * 0.4, 1.05);
+  const int SEGS = 10;
+  for (int i = 1; i <= SEGS; i++) {
+    float tt = float(i) / float(SEGS);
+    vec2 cur = mix(vec2(target.x * 0.4, 1.05), target, tt);
+    float jit = (hash21(vec2(float(i), seed)) - 0.5) * 0.55 * (1.0 - tt * 0.6);
+    cur.x += jit;
+    d = min(d, sdSeg(p, prev, cur));
+    // small branch from this node ~25% probability
+    if (hash21(vec2(float(i) + 17.0, seed)) > 0.62) {
+      vec2 branchEnd = cur + vec2(
+        (hash21(vec2(float(i) + 31.0, seed)) - 0.5) * 0.35,
+        -hash21(vec2(float(i) + 47.0, seed)) * 0.25
+      );
+      d = min(d, sdSeg(p, cur, branchEnd) * 1.5); // branches thinner
+    }
+    prev = cur;
+  }
+  return d;
+}
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m  = toAR(u_mouseSmooth);
+
+  // Strike timing: a new bolt every ~1.6 seconds, life ~0.35s
+  float t = u_time * 0.6;
+  float ti = floor(t);
+  float life = fract(t);
+  float seed = ti * 13.7;
+  // Aim at cursor, but with random offset that varies per strike
+  vec2 target = m + vec2(
+    (hash21(vec2(seed, 11.0)) - 0.5) * 0.4,
+    (hash21(vec2(seed, 22.0)) - 0.5) * 0.4
+  );
+  // Bolt visible only briefly
+  float boltAmp = exp(-life * 8.0);
+  float d = boltDist(uv, target, seed);
+
+  // Core (bright white) + glow (electric blue)
+  float core = exp(-d * 220.0) * boltAmp;
+  float glow = exp(-d * 24.0) * boltAmp * 0.8;
+  float wide = exp(-d * 6.0)  * boltAmp * 0.25;
+
+  vec3 baseCol = vec3(0.01, 0.012, 0.04);
+  // Sky tint that flashes during strike
+  vec3 flash = mix(baseCol, vec3(0.04, 0.06, 0.18), boltAmp * 0.8);
+  vec3 col = flash;
+
+  col += wide * vec3(0.20, 0.40, 1.0);
+  col += glow * vec3(0.55, 0.80, 1.0);
+  col += core * vec3(1.0, 1.0, 1.0);
+
+  // Persistent secondary bolt linked to cursor (always-on subtle)
+  float d2 = boltDist(uv, m, ti * 7.1 + 5.0);
+  col += exp(-d2 * 60.0) * 0.30 * vec3(0.45, 0.70, 1.0);
+
+  // Click triggers extra bolt straight to click point
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 0.6) {
+        vec2 cp = toAR(ck.xy);
+        float bd = boltDist(uv, cp, ck.z * 3.0);
+        float la = exp(-dt * 5.0);
+        col += exp(-bd * 200.0) * la * vec3(1.0);
+        col += exp(-bd * 20.0)  * la * vec3(0.6, 0.85, 1.0);
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.010;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 31. PLASMA GLOBE — radial electric arcs from a central orb, follow cursor.
+// ═══════════════════════════════════════════════════════════════════════════
+const PLASMA_GLOBE = `
+// Same sdSeg helper inlined (each shader is independent — keep self-contained).
+float pg_sdSeg(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+// One zig-zag arc from the orb to a target point.
+float pg_arc(vec2 p, vec2 target, float seed) {
+  float d = 1e6;
+  vec2 prev = vec2(0.0);
+  const int N = 7;
+  for (int i = 1; i <= N; i++) {
+    float tt = float(i) / float(N);
+    vec2 mid = mix(vec2(0.0), target, tt);
+    vec2 perp = vec2(-(target.y), target.x); // perpendicular
+    float jit = (hash21(vec2(float(i), seed + u_time)) - 0.5) * 0.18 * sin(tt * 3.14);
+    mid += perp * jit;
+    d = min(d, pg_sdSeg(p, prev, mid));
+    prev = mid;
+  }
+  return d;
+}
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m  = toAR(u_mouseSmooth);
+
+  // The orb sits a bit toward the cursor
+  vec2 orbPos = m * 0.3;
+  vec2 p = uv - orbPos;
+  float r = length(p);
+
+  vec3 bg = vec3(0.04, 0.01, 0.08);
+  vec3 col = bg;
+
+  // Orb glow
+  col += exp(-r * 3.5) * vec3(0.55, 0.20, 0.85) * 0.6;
+  // Orb core
+  col += exp(-r * 22.0) * vec3(1.0, 0.85, 1.0);
+
+  // 6 radial arcs to "wall" points at unit circle
+  for (int i = 0; i < 6; i++) {
+    float a = float(i) / 6.0 * 6.283 + u_time * 0.35;
+    // wander each tip slightly with time
+    a += sin(u_time * 1.1 + float(i)) * 0.18;
+    vec2 tip = vec2(cos(a), sin(a)) * (0.8 + 0.15 * sin(u_time * 2.0 + float(i) * 1.7));
+    // each arc has its own seed and slight time wobble (flicker)
+    float life = 0.5 + 0.5 * sin(u_time * 3.0 + float(i) * 2.1);
+    float d = pg_arc(p, tip, float(i) * 11.0 + floor(u_time * 4.0));
+    float arc = exp(-d * 90.0);
+    col += arc * mix(vec3(0.35, 0.20, 0.95), vec3(0.95, 0.55, 1.0), life);
+    col += exp(-d * 14.0) * 0.20 * vec3(0.4, 0.2, 1.0);
+  }
+
+  // Cursor draws an additional bright arc (the glass tube responding to touch)
+  {
+    vec2 cursorRel = m - orbPos;
+    float d = pg_arc(p, cursorRel, 99.0);
+    col += exp(-d * 180.0) * vec3(1.0, 0.95, 1.0);
+    col += exp(-d * 30.0)  * vec3(0.7, 0.45, 1.0) * 0.5;
+  }
+
+  // Click adds a transient super-bright arc
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 0.8) {
+        vec2 cp = toAR(ck.xy) - orbPos;
+        float d = pg_arc(p, cp, ck.z * 17.0);
+        float la = exp(-dt * 4.0);
+        col += exp(-d * 200.0) * la * vec3(1.0);
+        col += exp(-d * 22.0)  * la * vec3(0.85, 0.5, 1.0) * 0.6;
+      }
+    }
+  }
+  // Subtle vignette
+  col *= 1.0 - smoothstep(0.8, 1.4, length(uv)) * 0.4;
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.010;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 32. CAUSTICS — pool of water lit from above, shifting bright lines.
+// ═══════════════════════════════════════════════════════════════════════════
+const CAUSTICS = `
+// Two layers of Worley-style noise produce caustic-like bright lines where
+// they overlap. Inspired by Inigo Quilez's caustic technique.
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m  = toAR(u_mouseSmooth);
+
+  // Cursor warps the water surface
+  vec2 toM = m - uv;
+  vec2 p = uv + toM * exp(-length(toM) * 1.8) * 0.25;
+
+  // Two warped noise fields evolving at different rates
+  float t = u_time * 0.55;
+  vec2 q1 = vec2(fbm(p * 3.0 + t),
+                 fbm(p * 3.0 + vec2(5.2, 1.3) - t));
+  vec2 q2 = vec2(fbm(p * 4.5 + 1.5 * q1 + t * 0.7),
+                 fbm(p * 4.5 + 1.5 * q1 + vec2(8.3, 2.8) - t * 0.7));
+  float n = fbm(p * 6.0 + 2.0 * q2);
+
+  // Caustic peaks: contrast-stretched, gives bright filament-like highlights
+  float caustic = 1.0 - smoothstep(0.42, 0.62, n);
+  caustic = pow(caustic, 4.0);
+
+  // Depth gradient — bottom is dark, top brighter
+  float depth = smoothstep(-1.0, 1.0, uv.y);
+
+  vec3 deepCol = vec3(0.01, 0.05, 0.12);
+  vec3 midCol  = vec3(0.05, 0.30, 0.50);
+  vec3 hot     = vec3(0.80, 0.95, 1.00);
+
+  vec3 col = mix(deepCol, midCol, depth);
+  col += caustic * hot * 1.10;
+
+  // Subtle secondary caustic ring at smaller scale
+  float n2 = fbm(p * 10.0 + 1.5 * q2 - t);
+  float c2 = 1.0 - smoothstep(0.46, 0.55, n2);
+  col += pow(c2, 3.0) * vec3(0.35, 0.55, 0.65) * 0.40;
+
+  // Soft sun shaft from above
+  float shaft = exp(-pow(uv.x - m.x * 0.4, 2.0) * 4.0) * smoothstep(-0.5, 0.8, uv.y);
+  col += shaft * vec3(0.55, 0.75, 0.85) * 0.18;
+
+  // Cursor disturbs caustics
+  col += exp(-length(uv - m) * 5.0) * vec3(0.85, 0.95, 1.0) * 0.30;
+
+  // Click drops a ripple that bends caustics outward
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 3.5) {
+        vec2 cp = toAR(ck.xy);
+        float rr = dt * 0.5;
+        float ring = exp(-pow((length(uv - cp) - rr) * 10.0, 2.0)) * exp(-dt * 0.7);
+        col += ring * vec3(0.85, 1.0, 1.0) * 1.2;
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.010;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 33. TESLA — violent arcs radiating from a Tesla coil, follow cursor.
+// ═══════════════════════════════════════════════════════════════════════════
+const TESLA = `
+float ts_sdSeg(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+float ts_bolt(vec2 p, vec2 start, vec2 end, float seed) {
+  float d = 1e6;
+  vec2 prev = start;
+  const int N = 8;
+  for (int i = 1; i <= N; i++) {
+    float tt = float(i) / float(N);
+    vec2 base = mix(start, end, tt);
+    vec2 dir = normalize(end - start + 1e-4);
+    vec2 perp = vec2(-dir.y, dir.x);
+    float amp = 0.20 * sin(tt * 3.14);
+    float jit = (hash21(vec2(float(i), seed)) - 0.5) * amp;
+    base += perp * jit;
+    d = min(d, ts_sdSeg(p, prev, base));
+    prev = base;
+  }
+  return d;
+}
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m  = toAR(u_mouseSmooth);
+
+  // Coil at the bottom center; arcs reach toward cursor and around
+  vec2 coil = vec2(0.0, -0.55);
+  vec2 p = uv;
+
+  vec3 bg = vec3(0.03, 0.01, 0.04);
+  vec3 col = bg;
+
+  // Coil glow
+  float cr = length(p - coil);
+  col += exp(-cr * 4.0) * vec3(0.85, 0.65, 1.0) * 0.55;
+  col += exp(-cr * 30.0) * vec3(1.0);
+
+  // 5 arcs reaching out (one toward cursor, others random)
+  for (int i = 0; i < 5; i++) {
+    float fi = float(i);
+    float strikeT = u_time * 0.7 + fi * 1.31;
+    float si = floor(strikeT);
+    float life = fract(strikeT);
+    float amp = exp(-life * 5.0);
+    float seed = si * 11.0 + fi * 3.7;
+
+    vec2 target;
+    if (i == 0) {
+      target = m;                                  // first arc always seeks cursor
+    } else {
+      float ang = hash21(vec2(seed, 1.0)) * 6.283;
+      float rad = 0.5 + hash21(vec2(seed, 2.0)) * 0.6;
+      target = coil + vec2(cos(ang), sin(ang)) * rad;
+    }
+    float d = ts_bolt(p, coil, target, seed);
+    col += exp(-d * 240.0) * amp * vec3(1.0);
+    col += exp(-d * 28.0)  * amp * vec3(0.85, 0.55, 1.0) * 0.7;
+    col += exp(-d * 6.0)   * amp * vec3(0.40, 0.20, 0.85) * 0.25;
+  }
+
+  // Click sends a violent direct arc to click point
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 0.7) {
+        vec2 cp = toAR(ck.xy);
+        float d = ts_bolt(p, coil, cp, ck.z * 19.0);
+        float la = exp(-dt * 4.0);
+        col += exp(-d * 280.0) * la * vec3(1.0);
+        col += exp(-d * 36.0)  * la * vec3(0.95, 0.80, 1.0) * 0.8;
+      }
+    }
+  }
+  // Vignette
+  col *= 1.0 - smoothstep(0.8, 1.5, length(uv)) * 0.5;
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.010;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 34. QUANTUM — particle field with interference patterns + entanglement lines.
+// ═══════════════════════════════════════════════════════════════════════════
+const QUANTUM = `
+void main() {
+  vec2 uv = toAR(gl_FragCoord.xy);
+  vec2 m  = toAR(u_mouseSmooth);
+
+  // Two interfering wave sources (cursor and a mobile source)
+  vec2 src1 = m;
+  vec2 src2 = vec2(sin(u_time * 0.4) * 0.6, cos(u_time * 0.35) * 0.5);
+
+  float d1 = length(uv - src1);
+  float d2 = length(uv - src2);
+
+  // Interference pattern
+  float w1 = sin(d1 * 30.0 - u_time * 3.0);
+  float w2 = sin(d2 * 30.0 - u_time * 2.4);
+  float interf = (w1 + w2) * 0.5;
+  float amp = 0.5 + 0.5 * interf;
+
+  vec3 bg = vec3(0.02, 0.01, 0.10);
+  vec3 c1 = vec3(0.10, 0.40, 1.00);
+  vec3 c2 = vec3(1.00, 0.30, 0.85);
+  vec3 hot = vec3(0.95, 0.95, 1.0);
+
+  vec3 col = bg;
+  col = mix(col, c1, smoothstep(0.20, 0.55, amp));
+  col = mix(col, c2, smoothstep(0.65, 0.90, amp) * 0.7);
+
+  // Particle grid (quantum field as quantized samples)
+  vec2 g = uv * 28.0;
+  vec2 gi = floor(g);
+  vec2 gf = fract(g);
+  vec2 center = vec2(0.5);
+  float pd = length(gf - center);
+  float prob = 0.5 + 0.5 * sin(hash21(gi) * 6.283 + u_time * (1.0 + hash21(gi + 7.0) * 2.0));
+  prob = pow(prob, 6.0);
+  // particle visible where field amplitude is high
+  float particle = exp(-pd * 18.0) * prob * amp * 1.4;
+  col += particle * hot;
+
+  // Entanglement lines between sources
+  vec2 ab = src2 - src1;
+  vec2 ap = uv - src1;
+  float along = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+  float perp = abs(dot(ap - ab * along, vec2(-normalize(ab).y, normalize(ab).x)));
+  float ent = exp(-perp * 80.0) * (0.7 + 0.3 * sin(along * 30.0 - u_time * 4.0));
+  col += ent * vec3(0.85, 0.65, 1.0) * 0.45;
+
+  // Source halos
+  col += exp(-d1 * 6.0) * vec3(0.55, 0.85, 1.0) * 0.35;
+  col += exp(-d2 * 6.0) * vec3(1.00, 0.45, 0.85) * 0.30;
+
+  // Click: instantaneous wavefront collapse — bright ring + bg desat briefly
+  for (int i = 0; i < 8; i++) {
+    vec4 ck = u_clicks[i];
+    if (ck.w > 0.5) {
+      float dt = u_time - ck.z;
+      if (dt > 0.0 && dt < 3.0) {
+        vec2 cp = toAR(ck.xy);
+        float rr = dt * 0.6;
+        float ring = exp(-pow((length(uv - cp) - rr) * 11.0, 2.0)) * exp(-dt * 0.8);
+        col += ring * hot * 1.4;
+      }
+    }
+  }
+  col += (hash21(gl_FragCoord.xy + u_time) - 0.5) * 0.012;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
 const WALLPAPERS = [
   { id: 'mercury',     name: 'Mercury',     meta: 'Liquid chrome — pools toward your cursor',          frag: MERCURY,
     swatch: 'radial-gradient(120% 120% at 30% 30%, #c8d4ff 0%, #5e6f9c 40%, #0a0d1a 100%)' },
@@ -2261,6 +2659,16 @@ const WALLPAPERS = [
     swatch: 'linear-gradient(180deg, #02050f 0%, #084c7a 40%, #aedceb 75%, #ffd07a 100%)' },
   { id: 'curlfield',   name: 'Curl Field',  meta: 'Particle streams following a vector field',         frag: CURL_FIELD,
     swatch: 'linear-gradient(120deg, #04040e 0%, #1a4dc8 40%, #d2358a 75%, #fff0bc 100%)' },
+  { id: 'lightning',   name: 'Lightning',   meta: 'Procedural lightning bolt — strikes toward cursor', frag: LIGHTNING,
+    swatch: 'radial-gradient(60% 60% at 50% 30%, #ffffff 0%, #6ab5ff 25%, #1a2eaa 60%, #02041a 100%)' },
+  { id: 'plasmaglobe', name: 'Plasma Globe',meta: 'Radial electric arcs — click adds extra bolt',      frag: PLASMA_GLOBE,
+    swatch: 'radial-gradient(60% 60% at 50% 50%, #fff2ff 0%, #b260ff 25%, #5320a8 55%, #0a0418 100%)' },
+  { id: 'caustics',    name: 'Caustics',    meta: 'Underwater pool light — shifting bright lines',     frag: CAUSTICS,
+    swatch: 'linear-gradient(180deg, #01040d 0%, #1a6090 35%, #aef0ff 70%, #ffffff 100%)' },
+  { id: 'tesla',       name: 'Tesla',       meta: 'Tesla coil arcs radiating — chase cursor',          frag: TESLA,
+    swatch: 'radial-gradient(60% 80% at 50% 80%, #ffffff 0%, #c870ff 25%, #4e1a9c 60%, #04020a 100%)' },
+  { id: 'quantum',     name: 'Quantum',     meta: 'Interference field + entanglement lines',           frag: QUANTUM,
+    swatch: 'radial-gradient(120% 120% at 30% 50%, #6aa5ff 0%, #c43e9c 40%, #1c2e9a 70%, #02020c 100%)' },
 ];
 
 window.WALLPAPERS = WALLPAPERS;

@@ -718,6 +718,202 @@ void main(){
 }
 `;
 
+const LIGHTNING_TUNABLE = `
+uniform vec3 U_BG,U_GLOW,U_CORE,U_FLASH;
+uniform float U_STRIKE_RATE,U_FOLLOW_RATE,U_BRANCH_AMOUNT,U_INTENSITY,U_CLICK_INTENSITY;
+float lt_sdSeg(vec2 p,vec2 a,vec2 b){vec2 pa=p-a,ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-6),0.0,1.0); return length(pa-ba*h);}
+float lt_bolt(vec2 p,vec2 target,float seed,float branchAmount){
+  float d=1e6; vec2 prev=vec2(target.x*0.4,1.05);
+  const int SEGS=10;
+  for(int i=1;i<=SEGS;i++){
+    float tt=float(i)/float(SEGS);
+    vec2 cur=mix(vec2(target.x*0.4,1.05),target,tt);
+    float jit=(hash21(vec2(float(i),seed))-0.5)*0.55*(1.0-tt*0.6);
+    cur.x+=jit;
+    d=min(d,lt_sdSeg(p,prev,cur));
+    if(hash21(vec2(float(i)+17.0,seed))>1.0-branchAmount){
+      vec2 be=cur+vec2((hash21(vec2(float(i)+31.0,seed))-0.5)*0.35,-hash21(vec2(float(i)+47.0,seed))*0.25);
+      d=min(d,lt_sdSeg(p,cur,be)*1.5);
+    }
+    prev=cur;
+  }
+  return d;
+}
+void main(){
+  vec2 uv=toAR(gl_FragCoord.xy); vec2 m=toAR(u_mouseSmooth);
+  float t=u_time*U_STRIKE_RATE; float ti=floor(t); float life=fract(t);
+  float seed=ti*13.7;
+  vec2 target=m+vec2((hash21(vec2(seed,11.0))-0.5)*0.4,(hash21(vec2(seed,22.0))-0.5)*0.4);
+  float boltAmp=exp(-life*8.0)*U_INTENSITY;
+  float d=lt_bolt(uv,target,seed,U_BRANCH_AMOUNT);
+  vec3 col=mix(U_BG,U_FLASH,boltAmp*0.8);
+  col+=exp(-d*6.0)*U_GLOW*boltAmp*0.25;
+  col+=exp(-d*24.0)*U_GLOW*boltAmp*0.8;
+  col+=exp(-d*220.0)*U_CORE*boltAmp;
+  float d2=lt_bolt(uv,m,ti*7.1+5.0,U_BRANCH_AMOUNT*0.5);
+  col+=exp(-d2*60.0)*U_FOLLOW_RATE*U_GLOW;
+  for(int i=0;i<8;i++){vec4 ck=u_clicks[i]; if(ck.w>0.5){float dt=u_time-ck.z; if(dt>0.0&&dt<0.6){vec2 cp=toAR(ck.xy); float bd=lt_bolt(uv,cp,ck.z*3.0,U_BRANCH_AMOUNT); float la=exp(-dt*5.0); col+=exp(-bd*200.0)*la*U_CORE*U_CLICK_INTENSITY; col+=exp(-bd*20.0)*la*U_GLOW*U_CLICK_INTENSITY*0.6;}}}
+  col+=(hash21(gl_FragCoord.xy+u_time)-0.5)*0.010;
+  gl_FragColor=vec4(col,1.0);
+}
+`;
+
+const PLASMAGLOBE_TUNABLE = `
+uniform vec3 U_BG,U_ARC_LOW,U_ARC_HIGH,U_ORB;
+uniform float U_ARC_COUNT,U_FLICKER_SPEED,U_WARP_PULL,U_INTENSITY,U_CLICK_INTENSITY;
+float pgt_sdSeg(vec2 p,vec2 a,vec2 b){vec2 pa=p-a,ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-6),0.0,1.0); return length(pa-ba*h);}
+float pgt_arc(vec2 p,vec2 target,float seed){
+  float d=1e6; vec2 prev=vec2(0.0); const int N=7;
+  for(int i=1;i<=N;i++){
+    float tt=float(i)/float(N);
+    vec2 mid=mix(vec2(0.0),target,tt);
+    vec2 perp=vec2(-(target.y),target.x);
+    float jit=(hash21(vec2(float(i),seed+u_time))-0.5)*0.18*sin(tt*3.14);
+    mid+=perp*jit;
+    d=min(d,pgt_sdSeg(p,prev,mid)); prev=mid;
+  }
+  return d;
+}
+void main(){
+  vec2 uv=toAR(gl_FragCoord.xy); vec2 m=toAR(u_mouseSmooth);
+  vec2 orbPos=m*U_WARP_PULL; vec2 p=uv-orbPos; float r=length(p);
+  vec3 col=U_BG;
+  col+=exp(-r*3.5)*U_ARC_LOW*0.6;
+  col+=exp(-r*22.0)*U_ORB;
+  int arcs=int(U_ARC_COUNT);
+  for(int i=0;i<12;i++){
+    if(i>=arcs) break;
+    float fi=float(i);
+    float a=fi/U_ARC_COUNT*6.283+u_time*0.35;
+    a+=sin(u_time*U_FLICKER_SPEED+fi)*0.18;
+    vec2 tip=vec2(cos(a),sin(a))*(0.8+0.15*sin(u_time*2.0+fi*1.7));
+    float life=0.5+0.5*sin(u_time*3.0+fi*2.1);
+    float d=pgt_arc(p,tip,fi*11.0+floor(u_time*4.0));
+    col+=exp(-d*90.0)*mix(U_ARC_LOW,U_ARC_HIGH,life)*U_INTENSITY;
+    col+=exp(-d*14.0)*0.20*U_ARC_LOW;
+  }
+  vec2 cursorRel=m-orbPos;
+  float dc=pgt_arc(p,cursorRel,99.0);
+  col+=exp(-dc*180.0)*U_ORB;
+  col+=exp(-dc*30.0)*U_ARC_HIGH*0.5;
+  for(int i=0;i<8;i++){vec4 ck=u_clicks[i]; if(ck.w>0.5){float dt=u_time-ck.z; if(dt>0.0&&dt<0.8){vec2 cp=toAR(ck.xy)-orbPos; float d=pgt_arc(p,cp,ck.z*17.0); float la=exp(-dt*4.0); col+=exp(-d*200.0)*la*U_ORB*U_CLICK_INTENSITY; col+=exp(-d*22.0)*la*U_ARC_HIGH*U_CLICK_INTENSITY*0.6;}}}
+  col*=1.0-smoothstep(0.8,1.4,length(uv))*0.4;
+  col+=(hash21(gl_FragCoord.xy+u_time)-0.5)*0.010;
+  gl_FragColor=vec4(col,1.0);
+}
+`;
+
+const CAUSTICS_TUNABLE = `
+uniform vec3 U_DEEP,U_MID,U_HOT,U_SHAFT;
+uniform float U_FLOW_SPEED,U_SCALE,U_WARP_PULL,U_SHAFT_INTENSITY,U_CLICK_INTENSITY;
+void main(){
+  vec2 uv=toAR(gl_FragCoord.xy); vec2 m=toAR(u_mouseSmooth);
+  vec2 toM=m-uv; vec2 p=uv+toM*exp(-length(toM)*1.8)*U_WARP_PULL;
+  float t=u_time*U_FLOW_SPEED;
+  vec2 q1=vec2(fbm(p*U_SCALE+t),fbm(p*U_SCALE+vec2(5.2,1.3)-t));
+  vec2 q2=vec2(fbm(p*U_SCALE*1.5+1.5*q1+t*0.7),fbm(p*U_SCALE*1.5+1.5*q1+vec2(8.3,2.8)-t*0.7));
+  float n=fbm(p*U_SCALE*2.0+2.0*q2);
+  float caustic=1.0-smoothstep(0.42,0.62,n);
+  caustic=pow(caustic,4.0);
+  float depth=smoothstep(-1.0,1.0,uv.y);
+  vec3 col=mix(U_DEEP,U_MID,depth);
+  col+=caustic*U_HOT*1.10;
+  float n2=fbm(p*U_SCALE*3.3+1.5*q2-t);
+  float c2=1.0-smoothstep(0.46,0.55,n2);
+  col+=pow(c2,3.0)*U_MID*0.40;
+  float shaft=exp(-pow(uv.x-m.x*0.4,2.0)*4.0)*smoothstep(-0.5,0.8,uv.y);
+  col+=shaft*U_SHAFT*U_SHAFT_INTENSITY;
+  col+=exp(-length(uv-m)*5.0)*U_HOT*0.30;
+  for(int i=0;i<8;i++){vec4 ck=u_clicks[i]; if(ck.w>0.5){float dt=u_time-ck.z; if(dt>0.0&&dt<3.5){vec2 cp=toAR(ck.xy); float rr=dt*0.5; float ring=exp(-pow((length(uv-cp)-rr)*10.0,2.0))*exp(-dt*0.7); col+=ring*U_HOT*U_CLICK_INTENSITY;}}}
+  col+=(hash21(gl_FragCoord.xy+u_time)-0.5)*0.010;
+  gl_FragColor=vec4(col,1.0);
+}
+`;
+
+const TESLA_TUNABLE = `
+uniform vec3 U_BG,U_GLOW,U_CORE;
+uniform float U_ARC_COUNT,U_REACH,U_VIOLENCE,U_INTENSITY,U_CLICK_INTENSITY;
+float ts2_sdSeg(vec2 p,vec2 a,vec2 b){vec2 pa=p-a,ba=b-a; float h=clamp(dot(pa,ba)/max(dot(ba,ba),1e-6),0.0,1.0); return length(pa-ba*h);}
+float ts2_bolt(vec2 p,vec2 s,vec2 e,float seed,float vio){
+  float d=1e6; vec2 prev=s; const int N=8;
+  for(int i=1;i<=N;i++){
+    float tt=float(i)/float(N); vec2 base=mix(s,e,tt);
+    vec2 dir=normalize(e-s+1e-4); vec2 perp=vec2(-dir.y,dir.x);
+    float amp=0.20*sin(tt*3.14)*vio;
+    float jit=(hash21(vec2(float(i),seed))-0.5)*amp;
+    base+=perp*jit;
+    d=min(d,ts2_sdSeg(p,prev,base)); prev=base;
+  }
+  return d;
+}
+void main(){
+  vec2 uv=toAR(gl_FragCoord.xy); vec2 m=toAR(u_mouseSmooth);
+  vec2 coil=vec2(0.0,-0.55); vec2 p=uv;
+  vec3 col=U_BG;
+  float cr=length(p-coil);
+  col+=exp(-cr*4.0)*U_GLOW*0.55;
+  col+=exp(-cr*30.0)*U_CORE;
+  int arcs=int(U_ARC_COUNT);
+  for(int i=0;i<8;i++){
+    if(i>=arcs) break;
+    float fi=float(i);
+    float strikeT=u_time*0.7+fi*1.31;
+    float si=floor(strikeT); float life=fract(strikeT);
+    float amp=exp(-life*5.0)*U_INTENSITY;
+    float seed=si*11.0+fi*3.7;
+    vec2 target;
+    if(i==0){ target=m; }
+    else {
+      float ang=hash21(vec2(seed,1.0))*6.283;
+      float rad=U_REACH*(0.7+hash21(vec2(seed,2.0))*0.7);
+      target=coil+vec2(cos(ang),sin(ang))*rad;
+    }
+    float d=ts2_bolt(p,coil,target,seed,U_VIOLENCE);
+    col+=exp(-d*240.0)*amp*U_CORE;
+    col+=exp(-d*28.0)*amp*U_GLOW*0.7;
+    col+=exp(-d*6.0)*amp*U_GLOW*0.25;
+  }
+  for(int i=0;i<8;i++){vec4 ck=u_clicks[i]; if(ck.w>0.5){float dt=u_time-ck.z; if(dt>0.0&&dt<0.7){vec2 cp=toAR(ck.xy); float d=ts2_bolt(p,coil,cp,ck.z*19.0,U_VIOLENCE); float la=exp(-dt*4.0); col+=exp(-d*280.0)*la*U_CORE*U_CLICK_INTENSITY; col+=exp(-d*36.0)*la*U_GLOW*U_CLICK_INTENSITY*0.8;}}}
+  col*=1.0-smoothstep(0.8,1.5,length(uv))*0.5;
+  col+=(hash21(gl_FragCoord.xy+u_time)-0.5)*0.010;
+  gl_FragColor=vec4(col,1.0);
+}
+`;
+
+const QUANTUM_TUNABLE = `
+uniform vec3 U_BG,U_C1,U_C2,U_HOT;
+uniform float U_WAVE_FREQ,U_WAVE_SPEED,U_PARTICLE_DENSITY,U_ENT_INTENSITY,U_CLICK_INTENSITY;
+void main(){
+  vec2 uv=toAR(gl_FragCoord.xy); vec2 m=toAR(u_mouseSmooth);
+  vec2 src1=m; vec2 src2=vec2(sin(u_time*0.4)*0.6,cos(u_time*0.35)*0.5);
+  float d1=length(uv-src1); float d2=length(uv-src2);
+  float w1=sin(d1*U_WAVE_FREQ-u_time*U_WAVE_SPEED);
+  float w2=sin(d2*U_WAVE_FREQ-u_time*U_WAVE_SPEED*0.8);
+  float interf=(w1+w2)*0.5;
+  float amp=0.5+0.5*interf;
+  vec3 col=U_BG;
+  col=mix(col,U_C1,smoothstep(0.20,0.55,amp));
+  col=mix(col,U_C2,smoothstep(0.65,0.90,amp)*0.7);
+  vec2 g=uv*U_PARTICLE_DENSITY; vec2 gi=floor(g); vec2 gf=fract(g);
+  float pd=length(gf-vec2(0.5));
+  float prob=0.5+0.5*sin(hash21(gi)*6.283+u_time*(1.0+hash21(gi+7.0)*2.0));
+  prob=pow(prob,6.0);
+  float particle=exp(-pd*18.0)*prob*amp*1.4;
+  col+=particle*U_HOT;
+  vec2 ab=src2-src1; vec2 ap=uv-src1;
+  float along=clamp(dot(ap,ab)/max(dot(ab,ab),1e-6),0.0,1.0);
+  vec2 abN=normalize(ab+1e-4);
+  float perp=abs(dot(ap-ab*along,vec2(-abN.y,abN.x)));
+  float ent=exp(-perp*80.0)*(0.7+0.3*sin(along*30.0-u_time*4.0));
+  col+=ent*U_C2*U_ENT_INTENSITY;
+  col+=exp(-d1*6.0)*U_C1*0.35;
+  col+=exp(-d2*6.0)*U_C2*0.30;
+  for(int i=0;i<8;i++){vec4 ck=u_clicks[i]; if(ck.w>0.5){float dt=u_time-ck.z; if(dt>0.0&&dt<3.0){vec2 cp=toAR(ck.xy); float rr=dt*0.6; float ring=exp(-pow((length(uv-cp)-rr)*11.0,2.0))*exp(-dt*0.8); col+=ring*U_HOT*U_CLICK_INTENSITY;}}}
+  col+=(hash21(gl_FragCoord.xy+u_time)-0.5)*0.012;
+  gl_FragColor=vec4(col,1.0);
+}
+`;
+
 const CURLFIELD_TUNABLE = `
 uniform vec3 U_C1,U_C2,U_C3,U_C4;
 uniform float U_FIELD_SCALE,U_FLOW_SPEED,U_STREAK_STEPS,U_CURSOR_PULL,U_CLICK_INTENSITY;
@@ -1304,6 +1500,129 @@ const SCHEMAS = {
       'Sunset':  {deep:'#100614',mid:'#7a3050',crest:'#ffc0a0',sun:'#ff7050'},
     }),
 
+  // ── LIGHTNING ───────────────────────────────────────────────────────────
+  lightning: S_simple(LIGHTNING_TUNABLE,
+    { bg:'#02041a', glow:'#5fa6ff', core:'#ffffff', flash:'#0e1e5e',
+      strikeRate:0.6, followRate:0.30, branchAmount:0.40, intensity:1.0, clickIntensity:1.3 },
+    { U_BG:['color','bg'],U_GLOW:['color','glow'],U_CORE:['color','core'],U_FLASH:['color','flash'],
+      U_STRIKE_RATE:['float','strikeRate'],U_FOLLOW_RATE:['float','followRate'],
+      U_BRANCH_AMOUNT:['float','branchAmount'],U_INTENSITY:['float','intensity'],
+      U_CLICK_INTENSITY:['float','clickIntensity'] },
+    [
+      { title:'Palette', controls:[{type:'color',key:'bg',label:'Sky'},{type:'color',key:'flash',label:'Flash tint'},{type:'color',key:'glow',label:'Bolt glow'},{type:'color',key:'core',label:'Core'}]},
+      { title:'Bolt', controls:[
+        {type:'slider',key:'strikeRate',label:'Strike rate',min:0.1,max:3,step:0.05},
+        {type:'slider',key:'branchAmount',label:'Branches',min:0,max:1,step:0.02},
+        {type:'slider',key:'intensity',label:'Intensity',min:0,max:3,step:0.05}]},
+      { title:'Cursor follow', controls:[{type:'slider',key:'followRate',label:'Follower glow',min:0,max:1.5,step:0.02}]},
+      { title:'Click', controls:[{type:'slider',key:'clickIntensity',label:'Click bolt',min:0,max:3,step:0.05}]},
+    ],
+    {
+      'Storm':       {bg:'#02041a',glow:'#5fa6ff',core:'#ffffff',flash:'#0e1e5e'},
+      'Mage':        {bg:'#0e021a',glow:'#c065ff',core:'#ffffff',flash:'#3c1466'},
+      'Volcanic':    {bg:'#0a0204',glow:'#ff7a30',core:'#ffffd0',flash:'#5e1408'},
+      'Cold':        {bg:'#01070f',glow:'#7af0ff',core:'#ffffff',flash:'#0a3a5e'},
+    }),
+
+  // ── PLASMA GLOBE ────────────────────────────────────────────────────────
+  plasmaglobe: S_simple(PLASMAGLOBE_TUNABLE,
+    { bg:'#0a0418', arcLow:'#5b30b6', arcHigh:'#ff8cff', orb:'#fff0ff',
+      arcCount:6.0, flickerSpeed:1.1, warpPull:0.30, intensity:1.0, clickIntensity:1.4 },
+    { U_BG:['color','bg'],U_ARC_LOW:['color','arcLow'],U_ARC_HIGH:['color','arcHigh'],U_ORB:['color','orb'],
+      U_ARC_COUNT:['float','arcCount'],U_FLICKER_SPEED:['float','flickerSpeed'],
+      U_WARP_PULL:['float','warpPull'],U_INTENSITY:['float','intensity'],
+      U_CLICK_INTENSITY:['float','clickIntensity'] },
+    [
+      { title:'Palette', controls:[{type:'color',key:'bg',label:'Background'},{type:'color',key:'arcLow',label:'Arc low'},{type:'color',key:'arcHigh',label:'Arc high'},{type:'color',key:'orb',label:'Orb'}]},
+      { title:'Arcs', controls:[
+        {type:'slider',key:'arcCount',label:'Arc count',min:1,max:12,step:1},
+        {type:'slider',key:'flickerSpeed',label:'Flicker',min:0,max:5,step:0.05},
+        {type:'slider',key:'intensity',label:'Intensity',min:0,max:3,step:0.05}]},
+      { title:'Cursor', controls:[{type:'slider',key:'warpPull',label:'Orb follow',min:0,max:1.2,step:0.02}]},
+      { title:'Click', controls:[{type:'slider',key:'clickIntensity',label:'Click arc',min:0,max:3,step:0.05}]},
+    ],
+    {
+      'Classic':  {bg:'#0a0418',arcLow:'#5b30b6',arcHigh:'#ff8cff',orb:'#fff0ff'},
+      'Ice':      {bg:'#020c14',arcLow:'#1a90c8',arcHigh:'#7af0ff',orb:'#ffffff'},
+      'Inferno':  {bg:'#0a0404',arcLow:'#a02818',arcHigh:'#ffaa3a',orb:'#fff5e0'},
+      'Toxic':    {bg:'#040a04',arcLow:'#2ea838',arcHigh:'#aaff60',orb:'#f0ffd0'},
+    }),
+
+  // ── CAUSTICS ────────────────────────────────────────────────────────────
+  caustics: S_simple(CAUSTICS_TUNABLE,
+    { deep:'#020c1e', mid:'#0c4d80', hot:'#cef2ff', shaft:'#90b8cc',
+      flowSpeed:0.55, scale:3.0, warpPull:0.25, shaftIntensity:0.55, clickIntensity:1.2 },
+    { U_DEEP:['color','deep'],U_MID:['color','mid'],U_HOT:['color','hot'],U_SHAFT:['color','shaft'],
+      U_FLOW_SPEED:['float','flowSpeed'],U_SCALE:['float','scale'],
+      U_WARP_PULL:['float','warpPull'],U_SHAFT_INTENSITY:['float','shaftIntensity'],
+      U_CLICK_INTENSITY:['float','clickIntensity'] },
+    [
+      { title:'Palette', controls:[{type:'color',key:'deep',label:'Deep'},{type:'color',key:'mid',label:'Mid'},{type:'color',key:'hot',label:'Caustic'},{type:'color',key:'shaft',label:'Shaft'}]},
+      { title:'Water', controls:[
+        {type:'slider',key:'flowSpeed',label:'Flow speed',min:0,max:2,step:0.02},
+        {type:'slider',key:'scale',label:'Scale',min:1,max:8,step:0.1}]},
+      { title:'Light', controls:[{type:'slider',key:'shaftIntensity',label:'Sun shaft',min:0,max:2,step:0.02}]},
+      { title:'Cursor', controls:[{type:'slider',key:'warpPull',label:'Surface warp',min:0,max:1,step:0.02}]},
+      { title:'Click', controls:[{type:'slider',key:'clickIntensity',label:'Ripple',min:0,max:3,step:0.05}]},
+    ],
+    {
+      'Pool':     {deep:'#020c1e',mid:'#0c4d80',hot:'#cef2ff',shaft:'#90b8cc'},
+      'Reef':     {deep:'#021414',mid:'#0a8a78',hot:'#d2fff0',shaft:'#8ac0a8'},
+      'Cenote':   {deep:'#02041a',mid:'#0a4a8a',hot:'#aef0ff',shaft:'#7ac0ff'},
+      'Ice cave': {deep:'#040a14',mid:'#3a5aa0',hot:'#e0eaff',shaft:'#a0b8e0'},
+    }),
+
+  // ── TESLA ───────────────────────────────────────────────────────────────
+  tesla: S_simple(TESLA_TUNABLE,
+    { bg:'#04020a', glow:'#d090ff', core:'#ffffff',
+      arcCount:5.0, reach:0.7, violence:1.0, intensity:1.0, clickIntensity:1.5 },
+    { U_BG:['color','bg'],U_GLOW:['color','glow'],U_CORE:['color','core'],
+      U_ARC_COUNT:['float','arcCount'],U_REACH:['float','reach'],
+      U_VIOLENCE:['float','violence'],U_INTENSITY:['float','intensity'],
+      U_CLICK_INTENSITY:['float','clickIntensity'] },
+    [
+      { title:'Palette', controls:[{type:'color',key:'bg',label:'Background'},{type:'color',key:'glow',label:'Arc glow'},{type:'color',key:'core',label:'Core'}]},
+      { title:'Coil', controls:[
+        {type:'slider',key:'arcCount',label:'Arc count',min:1,max:8,step:1},
+        {type:'slider',key:'reach',label:'Arc reach',min:0.2,max:1.5,step:0.05},
+        {type:'slider',key:'violence',label:'Jitter',min:0,max:2.5,step:0.05},
+        {type:'slider',key:'intensity',label:'Intensity',min:0,max:3,step:0.05}]},
+      { title:'Click', controls:[{type:'slider',key:'clickIntensity',label:'Click strike',min:0,max:3,step:0.05}]},
+    ],
+    {
+      'Violet':  {bg:'#04020a',glow:'#d090ff',core:'#ffffff'},
+      'Electric':{bg:'#020a14',glow:'#80c8ff',core:'#ffffff'},
+      'Hellfire':{bg:'#0a0202',glow:'#ff7a30',core:'#fff8d0'},
+      'Toxic':   {bg:'#020a04',glow:'#90ff5e',core:'#f0ffd0'},
+    }),
+
+  // ── QUANTUM ─────────────────────────────────────────────────────────────
+  quantum: S_simple(QUANTUM_TUNABLE,
+    { bg:'#02011a', c1:'#1a66ff', c2:'#ff4cd6', hot:'#f0f0ff',
+      waveFreq:30.0, waveSpeed:3.0, particleDensity:28.0, entIntensity:0.45, clickIntensity:1.4 },
+    { U_BG:['color','bg'],U_C1:['color','c1'],U_C2:['color','c2'],U_HOT:['color','hot'],
+      U_WAVE_FREQ:['float','waveFreq'],U_WAVE_SPEED:['float','waveSpeed'],
+      U_PARTICLE_DENSITY:['float','particleDensity'],U_ENT_INTENSITY:['float','entIntensity'],
+      U_CLICK_INTENSITY:['float','clickIntensity'] },
+    [
+      { title:'Palette', controls:[{type:'color',key:'bg',label:'Void'},{type:'color',key:'c1',label:'Source 1'},{type:'color',key:'c2',label:'Source 2'},{type:'color',key:'hot',label:'Particles'}]},
+      { title:'Waves', controls:[
+        {type:'slider',key:'waveFreq',label:'Frequency',min:8,max:80,step:1},
+        {type:'slider',key:'waveSpeed',label:'Speed',min:0,max:10,step:0.1}]},
+      { title:'Particles', controls:[
+        {type:'slider',key:'particleDensity',label:'Density',min:8,max:60,step:1}]},
+      { title:'Entanglement', controls:[
+        {type:'slider',key:'entIntensity',label:'Link intensity',min:0,max:2,step:0.02}]},
+      { title:'Click', controls:[
+        {type:'slider',key:'clickIntensity',label:'Collapse',min:0,max:3,step:0.05}]},
+    ],
+    {
+      'Classic':  {bg:'#02011a',c1:'#1a66ff',c2:'#ff4cd6',hot:'#f0f0ff'},
+      'Acid':     {bg:'#040a02',c1:'#3ee03a',c2:'#ffe83a',hot:'#f5ffe0'},
+      'Plasma':   {bg:'#0a020a',c1:'#ff3e6a',c2:'#7a3aff',hot:'#fff5ff'},
+      'Cold':     {bg:'#020514',c1:'#3aaaff',c2:'#a0e0ff',hot:'#ffffff'},
+    }),
+
   // ── CURL FIELD ──────────────────────────────────────────────────────────
   curlfield: S_simple(CURLFIELD_TUNABLE,
     { c1:'#04040e', c2:'#1a4dc8', c3:'#d2358a', c4:'#fff0bc',
@@ -1335,11 +1654,12 @@ const FAMILY = {
   silk:'Subtle', vapor:'Subtle', tide:'Subtle', graphite:'Subtle',
   parchment:'Parchment', vellum:'Parchment', foxing:'Parchment', gilded:'Parchment', honey:'Parchment',
   matrix:'Cyberpunk', crt:'Cyberpunk', circuit:'Cyberpunk',
-  vortex:'Generative', curlfield:'Generative',
-  ocean:'Nature',
+  vortex:'Generative', curlfield:'Generative', quantum:'Generative',
+  ocean:'Nature', caustics:'Nature',
+  lightning:'Electric', plasmaglobe:'Electric', tesla:'Electric',
 };
 
-const FAMILIES = ['All', 'Originals', 'Space', 'Math', 'Subtle', 'Parchment', 'Cyberpunk', 'Generative', 'Nature', 'Aurora-family'];
+const FAMILIES = ['All', 'Originals', 'Space', 'Math', 'Subtle', 'Parchment', 'Electric', 'Cyberpunk', 'Generative', 'Nature', 'Aurora-family'];
 const AURORA_FAMILY_IDS = new Set(['aurora', 'parchment', 'vellum', 'foxing', 'gilded', 'honey']);
 
 window.FORGELABS_TUNABLE = { SCHEMAS, FAMILY, FAMILIES, AURORA_FAMILY_IDS };
