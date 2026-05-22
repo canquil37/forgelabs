@@ -190,7 +190,8 @@
       if (!gl) throw new Error('No WebGL');
       this.gl = gl;
       gl.enable(gl.SCISSOR_TEST);
-      gl.clearColor(0.027, 0.024, 0.040, 1.0);
+      // Fully transparent so the gallery background shows through gaps
+      gl.clearColor(0, 0, 0, 0);
 
       this.buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
@@ -358,13 +359,9 @@
         const tile = document.createElement('div');
         tile.className = 'tile';
         tile.dataset.id = wp.id;
-        const swatch = document.createElement('div');
-        swatch.className = 'swatch';
-        swatch.style.background = wp.swatch;
         const label = document.createElement('div');
         label.className = 'label';
         label.innerHTML = `<span class="name">${wp.name}</span><span class="fam">${FAMILY[wp.id] || ''}</span>`;
-        tile.appendChild(swatch);
         tile.appendChild(label);
         tile.title = wp.meta;
         tile.onclick = () => this.openWorkstation(wp.id);
