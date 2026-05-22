@@ -110,29 +110,43 @@ button.primary:hover { background: rgba(255,208,156,0.28); }
 /* ── Gallery ── */
 #gallery-view { overflow: hidden; }
 #gallery-view .toolbar {
-  position: sticky; top: 0;
+  position: absolute; top: 0; left: 0; right: 0;
   display: flex; gap: 12px; align-items: center;
   padding: 12px 16px;
-  background: rgba(7,6,10,0.75);
-  backdrop-filter: blur(10px);
+  background: rgba(7,6,10,0.90);
+  backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--panel-edge);
-  z-index: 10;
+  z-index: 11;
   flex-wrap: wrap;
 }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  position: relative;
+  z-index: 12;
+}
 .chip {
-  padding: 4px 10px;
+  position: relative;
+  display: inline-flex; align-items: center;
+  padding: 8px 16px;
+  min-height: 32px;
   border-radius: 999px;
-  font-size: 11px;
-  background: rgba(255,208,156,0.04);
-  border: 1px solid var(--panel-edge);
-  color: var(--ink-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: rgba(255,208,156,0.06);
+  border: 1px solid rgba(255,208,156,0.18);
+  color: var(--ink);
   cursor: pointer;
   user-select: none;
-  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+  z-index: 12;
+  /* full clickable surface */
+  -webkit-tap-highlight-color: rgba(255,208,156,0.25);
 }
-.chip:hover { color: var(--ink); border-color: rgba(255,208,156,0.20); }
-.chip.active { background: rgba(255,208,156,0.18); color: var(--gold); border-color: rgba(255,208,156,0.50); }
+.chip > * { pointer-events: none; }
+.chip:hover  { color: #fff4dd; border-color: rgba(255,208,156,0.45); background: rgba(255,208,156,0.14); }
+.chip:active { transform: scale(0.96); }
+.chip.active { background: rgba(255,208,156,0.22); color: var(--gold); border-color: rgba(255,208,156,0.65); }
 
 .search {
   flex: 1; min-width: 180px; max-width: 320px;
