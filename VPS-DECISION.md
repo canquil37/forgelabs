@@ -1,191 +1,230 @@
-# Decisión de Infraestructura — VPS, arquitectura y escalado (Forge OS / Tungsteno)
+# Decisión de Infraestructura — VPS vs Servidor Dedicado (Forge OS / Tungsteno)
 
-> Documento maestro de la decisión de VPS y arquitectura para escalar agentes,
-> automatizaciones y clientes. Consolidado por TUNIX-web (jun 2026) para Patricio
-> y TUNIX-VS Code. Reemplaza la VPS de Hostinger (problemas de CPU steal).
-
-> ⚠️ **ACTUALIZACIÓN DE PRECIOS (22-jun-2026).** Hetzner aplicó un alza fuerte el
-> **15-jun-2026** (price shock): CCX13 €15,99 → €43,49 (+169%), CCX23 ~€26 → **€86,49**.
-> Los precios de Hetzner que aparecen más abajo en este doc son **PRE-alza y están
-> obsoletos**. A precio real el **CCX23 ≈ ~$90k CLP, fuera de presupuesto**. La
-> decisión está en revisión: contendientes reales dentro de presupuesto (~$50k CLP)
-> son **Netcup RS 1000 G12** (4 cores dedicados/8GB/256GB NVMe, ~$41k CLP),
-> **Hetzner CCX13** (2/8, ~$45k CLP) y **Vultr Santiago** (2/8, ~$54k CLP, baja
-> latencia). Números finales pendientes de investigación en vivo.
-
-## TL;DR — la decisión
-
-- **Comprar:** *(en revisión tras el alza de Hetzner — ver nota arriba).* Candidato de mejor valor: **Netcup RS 1000 G12** (4 vCPU dedicados / 8 GB ECC / 256 GB NVMe) ~$41k CLP. Hetzner CCX23 quedó fuera de presupuesto (~$90k CLP).
-- **Por qué:** vCPU **dedicado** (mata el CPU steal de Hostinger), dentro de presupuesto, marca seria.
-- **Latencia:** irrelevante para tu carga — el VPS solo orquesta; el audio va por edge LATAM y la IA por APIs.
-- **Escala:** subir de tier dentro del proveedor; ruta a GPU para AI cuando TensorMed lo pida.
+> **Propósito:** contextualizar TODA la investigación y conversación del 22-jun-2026
+> sobre dónde alojar la infraestructura (VPS / servidor dedicado / bare-metal),
+> para que **TUNIX-PC (VS Code)** y Patricio tengan el panorama completo y decidan.
+> **La decisión sigue ABIERTA** — este doc deja los finalistas, precios verificados
+> y trade-offs para cerrarla. Reemplaza la VPS de Hostinger (saturada / CPU steal).
 
 ---
 
-## 1. El problema: CPU Steal y Jitter en Hostinger
+## 0. Contexto macro CRÍTICO (leer primero)
 
-- **CPU Steal:** en VPS sobrevendido, tus vCPUs son compartidos; el *steal time* (`%st` en `top`) es el % de tiempo en que tu vCPU quiere correr pero el núcleo físico está atendiendo a otro inquilino. En Hostinger barato puede ser 10-30% en peak. **Causa raíz de los problemas.**
-- **Jitter:** variabilidad impredecible en los tiempos de respuesta, causada por el steal. Peor que la latencia alta, porque no se puede compensar (es aleatorio). Arruina voz real-time y hace que los agentes se sientan erráticos.
-- **Dedicado (CCX/RS/Optimized):** cada vCPU pegado a un hilo físico reservado → steal ≈ 0%, jitter bajo, rendimiento constante.
+En 2026 hubo una **crisis global de memoria (DRAM +171% interanual por demanda de IA)**.
+Resultado: **TODOS los proveedores subieron precios** — Hetzner (+169% en cloud,
+3 alzas en 2026), OVH (abril), Netcup, Scaleway (junio). **No es escapable cambiando
+de marca; es macroeconómico.** Por eso el presupuesto hoy compra menos que hace un año.
+→ Conclusión: elegir por **calidad/exclusividad/valor**, no por perseguir el precio más bajo.
 
-## 1B. Cómo detectar steal ANTES de comprar (checklist)
+---
 
-El steal es **invisible en la página de venta**: te muestran "2 vCPU, 8 GB, NVMe" igual que un dedicado. El precio bajo *es* el steal (sobreventa). Cómo no caer:
+## 1. Situación y requisitos de Patricio
 
-**Antes de comprar:**
-- 🔍 Busca la palabra **"dedicated"** (dedicated cores / dedicated vCPU). Si **no** dice "dedicated" → asume **compartido** y con riesgo de steal.
-- 💸 Precio sospechosamente barato para las specs = CPU sobrevendido. Si es muy barato, alguien más usa tu núcleo.
-- 📜 Revisa el **fair-use / términos**: "recursos compartidos", "burstable", "uso justo" = compartido.
-- 📊 Mira benchmarks independientes (vpsbenchmarks.com) que miden el steal real.
-- 🏷️ Nomenclatura: "dedicated vCPU", "CCX" (Hetzner), "Optimized" (Vultr), "RS / Root Server" (Netcup) = garantizado. "vCPU", "CX/CPX" (Hetzner shared), "Regular/VX1" = compartido.
+- **Hoy:** paga ~$30k CLP/mes por VPS Hostinger. **Ahora está saturada al ~100%** (posible
+  minero/oversubscription) → le llegan alertas de incidencias. No ha tenido caídas, pero el
+  steal es real.
+- **Agosto:** entra **1 cliente confirmado pagando ~$220k CLP/mes**. De ahí salen ~$100k cloud
+  (APIs IA) + Supabase → margen ajustado al inicio.
+- **Necesidad inmediata (esta semana):** montar el **agente de ese cliente** en algo
+  **confiable y seguro** (sin el steal de Hostinger). Eso es no-negociable.
+- **2º prospecto:** preguntó explícitamente **dónde están los datos y qué seguridad tienen**
+  → ángulo de **soberanía de datos**.
+- **Proyección:** escalar a varios clientes (Emabel + TensorMed/salud), muchos agentes, mucha IA.
+- **Presupuesto:** ideal ~$30-50k CLP; dispuesto a **invertir más por alto estándar**.
+- **Quiere poder decir:** *"tengo un servidor/infra de alto estándar, exclusivo, datos en Chile."*
 
-**Una vez dentro (forense):**
-```bash
-top        # mira la columna %st (steal)
-```
-- `%st` ≈ 0% sostenido → dedicado real.
-- `%st` 5-20%+ en peak → te están robando CPU (compartido sobrevendido).
-- Cross-check: corre `sysbench cpu` a distintas horas; resultados inconsistentes = steal.
+---
 
-> **Ojo con la RAM:** en los planes "compartidos" la RAM y el disco normalmente **sí** son tuyos; lo que sobrevenden es el **CPU**. Por eso confunde: tienes tus 8 GB reales, pero tu CPU es prestado.
+## 2. El problema: CPU Steal y Jitter
 
-## 2. Comparación Hostinger vs Hetzner CCX23
+- **CPU Steal** (`%st` en `top`): en VPS sobrevendido, otros inquilinos te roban ciclos de CPU.
+  Hostinger barato puede tener 10-30% en peak. **Causa raíz de la saturación actual.**
+- **Jitter:** variabilidad impredecible de respuesta (causada por el steal). Peor que latencia
+  alta porque no se puede compensar. Arruina voz real-time y hace agentes erráticos.
 
-| Característica | Hostinger VPS | **Hetzner CCX23** |
+### Cómo detectar steal ANTES de comprar
+- Busca la palabra **"dedicated"**. Si no la dice → asume compartido.
+- Precio sospechosamente barato = CPU sobrevendido.
+- Nomenclatura: dedicado = "dedicated vCPU", "CCX" (Hetzner), "Optimized" (Vultr), "RS" (Netcup),
+  "Dedicated CPU" (Linode/DO). Compartido = "vCPU", "CX/CPX" (Hetzner), "Regular/VX1", "Basic".
+- Ya dentro: `top` → `%st` ≈ 0 dedicado; 5-20%+ en peak = te roban CPU.
+- Ojo: en planes compartidos la RAM/disco SÍ son tuyos; lo que sobrevenden es el **CPU**.
+
+---
+
+## 3. Concepto clave: VPS (vCPU dedicado) vs Servidor Dedicado (bare-metal)
+
+| | **VPS dedicado** | **Servidor dedicado (bare-metal / "fierro")** |
 |---|---|---|
-| vCPU | Compartido (sobrevendido) | **4 dedicados** (AMD EPYC) |
-| CPU Steal | Alto en peak | **~0%** |
-| Jitter | Alto | **Bajo** |
-| RAM / Disco | Variable | **16 GB / 160 GB NVMe** |
-| Rendimiento | Inconsistente | **Constante, garantizado** |
-| Escalado | Limitado | Resize en caliente CCX13→CCX63 |
-| Extras | Básico | Snapshots, firewall cloud, API/Terraform, IPv6, LB, redes privadas |
+| Qué es | Una **rebanada** con cores reservados | La **máquina física entera**, 100% tuya |
+| Exclusividad | Cores garantizados, virtualizado | Total — sin hypervisor ni vecinos |
+| Specs por $ | Menos (pagas la rebanada + conveniencia) | Más (el fierro completo, a veces consumer) |
+| Escalar | Resize en panel (rápido) | Horizontal / migración |
+| Ops tuyas | Menos (snapshots fáciles, el proveedor maneja fallas de host) | Más (tú: backups, recuperación; punto único de falla) |
+| Prestigio | Profesional | "Servidor dedicado" pega más fuerte ante clientes |
 
-## 3. Arquitectura: 4 capas, cada una en su lugar
+**Niveles de exclusividad:** Bare-metal (total) > vCPU pinned real (Hetzner CCX, Linode, Vultr
+Optimized) > soft-dedicado (Netcup RS, baja sobreventa, sin throttle por contrato) > compartido
+(Hostinger, OVH VPS — con steal).
+
+---
+
+## 4. Arquitectura recomendada (4 capas — no mezclar)
 
 | Capa | Qué hace | Dónde vive |
 |---|---|---|
-| 🎤 Media (audio real-time) | Audio en vivo | Edge LATAM (gestionado São Paulo / o nodo propio) |
-| 🧠 Orquestación | Flujos, lógica, integraciones | **n8n en la VPS (CCX23)** |
-| 🗄️ Datos | Tablas, RAG, info actualizada | **Supabase** |
-| 🖥️ Frontend | Landings, paneles | Vercel |
-| 📦 Archivos pesados | Documentos, media de clientes | **Cloudflare R2** |
+| 🎤 Media (voz real-time) | Audio en vivo | Edge LATAM (gestionado São Paulo) |
+| 🧠 Orquestación | n8n + agentes + flujos | **El servidor/VPS** |
+| 🗄️ Datos | Tablas, RAG | **Supabase** (Cloud, o self-hosted en Chile p/soberanía) |
+| 📦 Archivos pesados | Documentos, media | **Cloudflare R2** ($0 egress) |
 
-Regla: **no mezclar capas.** Datos → Supabase. Orquestación → VPS. Audio → edge. Archivos → R2. Cada una escala por separado sin tumbar a las otras.
-
-## 4. Cómo se alimenta de datos un agente: dos tipos de tools
-
-- 🟢 **Tipo A — lectura/escritura simple → Supabase DIRECTO.** Una consulta a Postgres (RPC indexado). ~50-150 ms. El VPS no interviene. Ej: "trae historial del cliente", "busca en RAG".
-- 🟠 **Tipo B — orquestación compleja → n8n en la VPS.** Multi-paso, multi-sistema, APIs externas. Ej: "agenda + correo + WSP + actualiza CRM".
-
-**Regla de oro:** dato puntual → Supabase directo. Flujo multi-paso → n8n/VPS. Nunca mandes una lectura simple a dar la vuelta por n8n.
-
-## 5. Latencia de agentes (el problema de TUNIX Talk) — es config, no VPS
-
-La latencia se siente cuando un tool está en el **camino crítico** (el agente debe llamarlo antes de hablar). Fixes:
-1. **Latency masking:** el agente dice "déjame revisar..." y corre el tool en paralelo.
-2. **Tools calientes = Supabase directo** (RPC indexado), no n8n.
-3. **Menos tools, mejor enrutadas** (demasiados → el LLM pierde tiempo eligiendo).
-4. **Pre-carga al inicio** (contexto del cliente cacheado en session start).
-5. **n8n caliente y por webhook** (sin cold-start ni polling).
-
-## 6. Voz real-time: el audio NO pasa por el VPS
-
-Flujo de un turno: `Cliente → edge media → STT (Deepgram) → LLM → [tool call → VPS] → TTS → edge media → Cliente`. El audio viaja **cliente ↔ edge ↔ STT/TTS**; el VPS solo recibe JSON de lógica (~150 ms, invisible).
-
-| Escenario | ¿Nodo propio? | Turno total | Calidad |
-|---|---|---|---|
-| A. Gestionado (edge São Paulo) | ❌ No | ~500-700 ms | 🟢 Premium |
-| B. Nodo propio Santiago/SP | ✅ ~$12-18/mo | ~500-700 ms | 🟢 Premium |
-| C. Todo en US (sin edge LATAM) | ❌ No | ~850-1000 ms | 🟡 Usable |
-
-**No necesitas nodo propio en Chile/Brasil:** con un proveedor gestionado usas su edge São Paulo sin provisionar nada. Nodo propio solo si el volumen alto justifica bajar costo por minuto.
-
-## 7. Storage: Cloudflare R2, NUNCA el disco del VPS
-
-🚫 Archivos de clientes en el disco de cómputo = riesgo de que un cliente llene el disco y **caiga todo (n8n, agentes)**.
-
-✅ Object storage desacoplado:
-| Opción | Storage | Egress | Cuándo |
-|---|---|---|---|
-| **Cloudflare R2** | ~$0.015/GB/mes | **$0 gratis** | Archivos pesados, mucha descarga (ej: Instituto Teológico) |
-| Supabase Storage | ~$0.021/GB/mes | Se cobra | Archivos atados a usuarios con RLS |
-
-100 GB en R2 ≈ $1.5/mes, egress gratis, aislado del cómputo. **Para el Instituto Teológico y archivos de clientes: R2.**
-
-## 8. Capacidad del CCX23
-
-Orquestar es **I/O-bound** (los agentes esperan red, no queman CPU) → un box de 4 vCPU aguanta muchos agentes en paralelo.
-
-| Recurso | CCX23 cómodo | Aprieta |
-|---|---|---|
-| Empresas medianas | 5-8 | 12+ pesadas |
-| Agentes concurrentes (orquestación) | 10-20 | 30+ |
-| Ejecuciones n8n/día | 5k-20k | 50k+ flujos pesados |
-| Voz simultánea | 10-15 | según peso de tools |
-| Webhooks/día | miles | cientos/seg sostenido |
-
-**6 medianas + 10 agentes en paralelo = entra cómodo** (~40-60% de uso). Lo único que lo tumba: trabajo pesado de CPU en el box (video, datasets, LLM local) → offloadear.
-
-## 9. Escalado dentro de Hetzner (sin cambiar de marca)
-
-| Plan | vCPU / RAM / Disco | Precio aprox/mes |
-|---|---|---|
-| CCX13 | 2 / 8GB / 80GB | ~$17 |
-| **CCX23** ⭐ | 4 / 16GB / 160GB | ~$32 |
-| CCX33 | 8 / 32GB / 240GB | ~$63 |
-| CCX43 | 16 / 64GB / 360GB | ~$125 |
-| CCX63 | 48 / 192GB / 960GB | ~$370 |
-
-- **Vertical:** resize en caliente (CPU+RAM suben juntos; **no se puede solo RAM**), conserva disco, ~2 min, reversible.
-- **Disco extra:** Volumes independientes.
-- **Horizontal:** múltiples nodos + load balancer + n8n en queue mode (para resiliencia a ~10 clientes pesados).
-- **Más allá:** bare-metal dedicado, GPU (GEX).
-
-## 10. IA / GPU / Training — la realidad
-
-- El CCX23 (y todo CCX) es **CPU-only**: **no entrena IA** ni corre LLMs locales.
-- **Pero el 99% de tu stack es inferencia vía API** (Anthropic, Deepgram, Voyage, ElevenLabs) → **no necesita GPU**. El CCX23 orquesta perfecto.
-- **Cuando TensorMed/AETOS fine-tunee** su modelo médico → necesitas GPU:
-  - **Dentro de Hetzner:** línea **GEX** (GEX44 RTX 4000 Ada 20GB ≈ €184/mo; GEX130 RTX 6000 ≈ €838/mo).
-  - **Más inteligente para training intermitente:** GPU **por hora** (RunPod/Vast/Lambda) — entrenas, apagas, pagas solo lo usado.
-- Estrategia 2 servers: CCX23 (cerebro, hoy) + GEX/GPU-hora (músculo IA, cuando TensorMed lo pida).
-
-## 11. Resumen de costos
-
-| Componente | Costo/mes | Cuándo |
-|---|---|---|
-| VPS CCX23 (orquestación) | ~$32 | Ahora |
-| Supabase | plan actual | Ahora |
-| Cloudflare R2 (storage) | centavos/GB, egress $0 | Cuando haya archivos |
-| Edge voz (gestionado) | $0 fijo, pago por minuto | Cuando haya cliente de voz |
-| Nodo media propio (opcional) | ~$12-18 | Solo si volumen alto |
-| GPU (GEX o por hora) | desde €184/mo o ~€1-3/hora | Cuando TensorMed entrene |
-
-**Base de partida: ~$32/mes + storage en centavos.**
+- **Tools del agente:** lectura simple → Supabase directo (rápido). Flujo multi-paso → n8n.
+- **Voz real-time:** el audio NO pasa por el servidor (va por edge) → los 150-230ms del servidor
+  no afectan la voz. El servidor solo orquesta.
+- **Archivos de clientes → R2, NUNCA el disco del servidor** (si se llena, se cae todo).
 
 ---
 
-## 12. Checklist de migración desde Hostinger
+## 5. Investigación de proveedores — PRECIOS VERIFICADOS (22-jun-2026)
 
-- [ ] Crear cuenta Hetzner (puede pedir verificación de identidad, ~1 día — hacerlo con tiempo).
-- [ ] Provisionar **CCX23 en Ashburn, VA**. Confirmar precio exacto al momento.
-- [ ] Activar **snapshots/backups automáticos** desde el día uno.
-- [ ] Activar **firewall cloud** (cerrar puertos, exponer solo lo necesario).
-- [ ] Instalar stack: Docker + n8n (modo webhook; queue mode cuando escale).
-- [ ] Migrar workflows de n8n desde Hostinger (export/import).
-- [ ] Apuntar webhooks (WSP, Meta, Resend, forms) al nuevo host.
-- [ ] Verificar que datos siguen en **Supabase** (no migrar DB al VPS).
-- [ ] Crear bucket **Cloudflare R2** para archivos de clientes / Instituto Teológico.
-- [ ] Validar latencia/estabilidad (sin steal: `top` debe mostrar `%st` ≈ 0).
-- [ ] Apagar la VPS de Hostinger una vez verificado todo.
-- [ ] Documentar credenciales en `forge_secrets` (vault Supabase).
+Conversión: USD≈960 CLP, EUR≈1.030 CLP. Confianza alta salvo nota.
 
-## 13. Reglas de oro (para no equivocarse al escalar)
+### VPS dedicado (vCPU)
+| Proveedor / plan | Cores ded. / RAM / Disco | Precio | CLP | Latencia Chile | Datos en Chile |
+|---|---|---|---|---|---|
+| **Vultr Optimized 2/8** (Santiago) | 2 / 8GB | $56 +19% IVA ≈ $67 | ~$64k | **<20ms** | ✅ |
+| **Vultr VX1 2/8** | 2 / 8GB | $43.80 (+IVA) | ~$50k | <20ms si Santiago | ✅ |
+| **Netcup RS 2000 G12** | 8 / 16GB (soft⚠️) | €16.89 | ~$17k | 150ms(VA)/230ms(EU) | ❌ |
+| **Netcup RS 4000 G12** | 12 / 32GB (soft⚠️) | €27.08 | ~$28k | igual | ❌ |
+| **Netcup RS 8000 G12** | 16 / 64GB (soft⚠️) | €48.33 | ~$50k | igual | ❌ |
+| **Linode Dedicated 4GB** (São Paulo) | 2 / 4GB (pinned) | $36 | ~$35k | ~50ms | ❌ (Brasil) |
+| **Hetzner CCX13** | 2 / 8GB (pinned) | €43.49 | ~$45k | ~150ms(VA) | ❌ |
+| **Hetzner CCX23** | 4 / 16GB | €86.49 | ~$90k ❌ | ~150ms | ❌ |
+| **Scaleway PRO2-XXS** | 2 / 8GB (pinned) | €40.15 | ~$41k | ~230ms (EU) | ❌ |
+| DigitalOcean GP 2/8 | 2 / 8GB (pinned) | $63 | ~$60k | ~150ms (NY) | ❌ |
+| Kamatera Type D | ~$90-160 | over | — | ~130ms (Miami) | ❌ |
 
-1. **No compres capacidad para clientes que no tienes.** Parte CCX23, sube cuando los metrics lo pidan.
-2. **No mezcles capas:** datos→Supabase, orquestación→VPS, audio→edge, archivos→R2.
-3. **Lecturas simples directas a Supabase**, no por n8n.
-4. **Nada de archivos de clientes en el disco del VPS** → R2.
-5. **Training en GPU dedicada/por hora**, no en el VPS de cómputo.
-6. **A los ~10 clientes pesados:** piensa en resiliencia (2 nodos + LB), no solo en tamaño.
+### Bare-metal (fierro)
+| Proveedor / plan | CPU / RAM / Disco | Precio | CLP | Latencia | Datos en Chile |
+|---|---|---|---|---|---|
+| **Latitude.sh m4.metal.small** (Santiago) | EPYC 6c / **64GB** / 1.9TB / GPU-ready | **$131 reservado / $270 on-demand** | ~$126-260k | **<10ms** | ✅ |
+| **Hetzner AX42** | Ryzen 8c / 64GB / 1TB | €49 | ~$50k | ~230ms (EU) | ❌ |
+| **OVH RISE / Advance** (US) | bare-metal EPYC | ~$92-102 | ~$90-98k | ~150ms | ❌ |
+| **DCH** (chileno) | dedicado, soporte local | ~$135k CLP | $140 | <10ms | ✅✅ |
+| **HostingCenter.cl** | hardware a medida | $199.900+IVA | $210 | <10ms | ✅✅ |
+
+⚠️ **Notas de precio:** Hetzner subió 3 veces en 2026 (los números son post-alza). Vultr
+Santiago lleva ~19% IVA Chile + posible premium regional → confirmar en panel. Latitude cambió
+su lineup: el viejo "c2.small $92" YA NO EXISTE; el actual es m4.metal.small ($131 reservado).
+Precios de Vultr/Latitude/chilenos: **confirmar en el panel del proveedor** (bloquean scraping).
+
+### Vultr Santiago: ¿fierro directo?
+**NO.** Santiago ofrece Cloud Compute + **Optimized (vCPU dedicado)** + Kubernetes + Object
+Storage. **Bare-metal NO está en Santiago** (solo en hubs grandes). Para fierro en Chile →
+Latitude.sh o proveedor chileno. Bonus: datacenter Vultr Santiago tiene **PCI DSS + SOC 2 Type 2**
+(respuesta de seguridad concreta para el cliente que preguntó).
+
+---
+
+## 6. Latencia a Chile (verificada)
+In-country Chile **<10ms** → São Paulo **~40-55ms** → US-West/LA ~100-140ms → Miami ~120-170ms →
+US-East/Virginia ~140-165ms → **Europa ~220-260ms**.
+> Para carga backend/orquestación (asíncrona) la latencia es irrelevante. Solo importa para
+> usuarios chilenos en tiempo real (que de todos modos van por edge/Vercel).
+
+---
+
+## 7. Soberanía de datos (Chile) — argumento de venta REAL
+- Para **salud/TensorMed**, "los datos NO salen de Chile" es vendible y casi compliance
+  (**Ley 21.719** de protección de datos). Suma: soporte español + mantención directa + <10ms.
+- **Supabase Cloud NO tiene región Chile** (lo más cerca São Paulo). Para soberanía REAL →
+  **self-host Supabase en un servidor chileno**.
+
+---
+
+## 8. Capacidad (VPS 2 vCPU / 8GB dedicado, bien optimizada)
+Con **datos en Supabase Cloud + archivos en R2 + n8n multi-tenant**:
+- Clientes bien estructurados: **5 cómodo**, 7-8 estirando, **10 = punto de upgrade**.
+- Agentes concurrentes: 10-15 (la IA corre en APIs, no en el box).
+- Ejecuciones n8n/día: 5.000-15.000.
+> ⚠️ Si self-hosteas Supabase EN la misma caja de 8GB → baja a 2-3 clientes (come 2-4GB). En
+> producción multi-cliente: datos en Supabase Cloud, NO self-hosted encima.
+> El servidor es **costo FIJO compartido** entre todos los clientes → margen mejora por cliente.
+- Upgrade: Vultr resize a 4/16, o Netcup RS 4000 (12c/32GB), o 2 nodos. Trigger: RAM>75% o ~8 clientes.
+
+---
+
+## 9. Self-hosted Supabase — ahorro + soberanía, pero con responsabilidad
+- ✅ Elimina la suscripción Supabase Cloud (~$25-48k CLP/mes) + da datos en Chile.
+- ⚠️ Te vuelves el DBA: **backups off-site (a R2), seguridad, updates, recuperación**. Con datos
+  de clientes, un error = pérdida/brecha. Concentra riesgo (1 caja = compute + datos).
+- 🔑 **Aprenderlo en SANDBOX primero** (Hetzner AX42 64GB), no con datos de clientes a la primera.
+
+---
+
+## 10. Servidor en casa + UPS — opinión
+- ❌ **Producción para clientes: NO.** Internet residencial sin SLA + la UPS cubre minutos (no
+  horas) + no resuelve corte de internet → inalcanzable. Opuesto al alto estándar.
+- ✅ **Futuro: máquina de ENTRENAMIENTO de IA.** Ahí la UPS sí sirve (protege training de
+  parpadeos). Datos en Supabase. Cargas no-críticas.
+- 🔮 Instalar servidores en sitios de clientes (on-premise) = producto B2B futuro, requiere más madurez.
+
+---
+
+## 11. GPU / training de IA
+- El CCX/VPS/AX42 son **CPU-only** → no entrenan modelos. Tu stack actual es **inferencia vía API**
+  (no necesita GPU). Para fine-tuning de TensorMed: Latitude.sh GPU (Santiago, por hora),
+  Netcup vGPU, o RunPod/Vast (training en ráfaga, lo más barato).
+
+---
+
+## 12. 🎯 LA DECISIÓN (abierta) — finalistas y trade-offs
+
+**Requisitos:** confiable (sin steal), seguro, datos en Chile (idealmente), escalable, ~$30-90k CLP.
+
+### Opción A — Pragmática AHORA (recomendada para esta semana)
+**Vultr Santiago, Optimized o VX1 (2 vCPU/8GB dedicado) ≈ $50-64k CLP.**
+- ✅ No steal, datos en Chile, PCI DSS/SOC 2, reputado, resize sin migrar, deploy esta semana,
+  aguanta 5 clientes. Cubierto de sobra por el cliente de $220k.
+- ➖ No es fierro; 8GB limita self-hosted Supabase.
+
+### Opción B — Puente ultra-barato
+**Netcup RS 2000 G12 (8c/16GB) ≈ $17k CLP** — más barato que Hostinger, mucho más máquina.
+- ➖ Soft-dedicado (riesgo pequeño/raro de steal — incidente G11 2024), datos no en Chile,
+  soporte autoservicio. Migrar a Chile después (build en Docker = fácil).
+
+### Opción C — Alto estándar (fierro, para 3-5+ clientes)
+**Latitude.sh m4.metal.small (6c/64GB/1.9TB) Santiago ≈ $131k CLP reservado.**
+- ✅ Fierro 100% tuyo, datos en Chile, GPU-ready, self-host Supabase (soberanía + ahorro),
+  64GB hostea 10-15 clientes. El estándar que Patricio quiere defender.
+- ➖ Caro para 1 cliente esta semana; más ops (backups, punto único de falla).
+
+### Sandbox / aprendizaje
+**Hetzner AX42 (8c/64GB) ≈ $50k CLP** — para practicar self-hosted Supabase sin tocar producción.
+
+---
+
+## 13. Ruta sugerida (staged)
+```
+ESTA SEMANA:   Vultr Santiago dedicado (Opción A) → 1er cliente, confiable, datos en Chile
+               + aliviar Hostinger (subir plan) mientras se migra lo actual sin presión
+APRENDIZAJE:   Hetzner AX42 (sandbox) → dominar self-hosted Supabase + build en Docker (portable)
+3-5 CLIENTES:  Latitude.sh fierro Santiago (Opción C) → alto estándar, soberanía, GPU-ready
+FUTURO:        Workstation GPU en casa + UPS → entrenar IA (datos en Supabase)
+```
+> Todo en **Docker/docker-compose** desde el día uno → migrar entre proveedores = copy-paste.
+
+---
+
+## 14. Estado y próximos pasos
+- [ ] **Patricio:** confirmar en panel de Vultr el precio real de Santiago (Optimized/VX1 2/8 + IVA).
+- [ ] **Patricio:** confirmar en panel de Latitude el precio de m4.metal.small en Santiago.
+- [ ] Decidir Opción A vs B vs C según caja de esta semana y apetito de ops.
+- [ ] Montar el 1er agente en **Docker** (portable) — aislar cada cliente por workflow + RLS.
+- [ ] Configurar **R2** para archivos de clientes.
+- [ ] (Aprendizaje) Sandbox de self-hosted Supabase.
+
+> **Honestidad de fuentes:** Hetzner verificado (screenshot + docs). Vultr/Latitude/Netcup/
+> chilenos: precios de páginas oficiales vía snippets (bloquean scraping) → **confirmar el número
+> final en el panel del proveedor antes de pagar**. Hubo 2 correcciones de precio en la sesión
+> (alza Hetzner 15-jun, y cambio de lineup de Latitude: c2.small→m4.metal.small).
