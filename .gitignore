@@ -5,3 +5,6 @@ Thumbs.db
 *.log
 .env
 .env.local
+
+# TUNIX bridge debug log (local only)
+.claude/hooks/tunix-bridge.log
