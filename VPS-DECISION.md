@@ -4,12 +4,21 @@
 > automatizaciones y clientes. Consolidado por TUNIX-web (jun 2026) para Patricio
 > y TUNIX-VS Code. Reemplaza la VPS de Hostinger (problemas de CPU steal).
 
+> ⚠️ **ACTUALIZACIÓN DE PRECIOS (22-jun-2026).** Hetzner aplicó un alza fuerte el
+> **15-jun-2026** (price shock): CCX13 €15,99 → €43,49 (+169%), CCX23 ~€26 → **€86,49**.
+> Los precios de Hetzner que aparecen más abajo en este doc son **PRE-alza y están
+> obsoletos**. A precio real el **CCX23 ≈ ~$90k CLP, fuera de presupuesto**. La
+> decisión está en revisión: contendientes reales dentro de presupuesto (~$50k CLP)
+> son **Netcup RS 1000 G12** (4 cores dedicados/8GB/256GB NVMe, ~$41k CLP),
+> **Hetzner CCX13** (2/8, ~$45k CLP) y **Vultr Santiago** (2/8, ~$54k CLP, baja
+> latencia). Números finales pendientes de investigación en vivo.
+
 ## TL;DR — la decisión
 
-- **Comprar:** Hetzner **CCX23** (4 vCPU dedicados / 16 GB / 160 GB NVMe), ubicación **Ashburn, VA (US)**. ~$32 USD/mes (~$30k CLP).
-- **Por qué:** vCPU **dedicado** (mata el CPU steal de Hostinger), mejor precio/potencia del mercado, escalable en caliente, marca seria.
-- **Latencia (150 ms a Chile):** irrelevante — el VPS solo orquesta; el audio va por edge LATAM y la IA por APIs.
-- **Escala:** resize en caliente CCX13→CCX63 (hasta 48 vCPU/192 GB), luego bare-metal y GPU (GEX), todo dentro de Hetzner.
+- **Comprar:** *(en revisión tras el alza de Hetzner — ver nota arriba).* Candidato de mejor valor: **Netcup RS 1000 G12** (4 vCPU dedicados / 8 GB ECC / 256 GB NVMe) ~$41k CLP. Hetzner CCX23 quedó fuera de presupuesto (~$90k CLP).
+- **Por qué:** vCPU **dedicado** (mata el CPU steal de Hostinger), dentro de presupuesto, marca seria.
+- **Latencia:** irrelevante para tu carga — el VPS solo orquesta; el audio va por edge LATAM y la IA por APIs.
+- **Escala:** subir de tier dentro del proveedor; ruta a GPU para AI cuando TensorMed lo pida.
 
 ---
 
@@ -17,7 +26,28 @@
 
 - **CPU Steal:** en VPS sobrevendido, tus vCPUs son compartidos; el *steal time* (`%st` en `top`) es el % de tiempo en que tu vCPU quiere correr pero el núcleo físico está atendiendo a otro inquilino. En Hostinger barato puede ser 10-30% en peak. **Causa raíz de los problemas.**
 - **Jitter:** variabilidad impredecible en los tiempos de respuesta, causada por el steal. Peor que la latencia alta, porque no se puede compensar (es aleatorio). Arruina voz real-time y hace que los agentes se sientan erráticos.
-- **CCX23 (dedicado):** cada vCPU pegado a un hilo físico reservado → steal ≈ 0%, jitter bajo, rendimiento constante.
+- **Dedicado (CCX/RS/Optimized):** cada vCPU pegado a un hilo físico reservado → steal ≈ 0%, jitter bajo, rendimiento constante.
+
+## 1B. Cómo detectar steal ANTES de comprar (checklist)
+
+El steal es **invisible en la página de venta**: te muestran "2 vCPU, 8 GB, NVMe" igual que un dedicado. El precio bajo *es* el steal (sobreventa). Cómo no caer:
+
+**Antes de comprar:**
+- 🔍 Busca la palabra **"dedicated"** (dedicated cores / dedicated vCPU). Si **no** dice "dedicated" → asume **compartido** y con riesgo de steal.
+- 💸 Precio sospechosamente barato para las specs = CPU sobrevendido. Si es muy barato, alguien más usa tu núcleo.
+- 📜 Revisa el **fair-use / términos**: "recursos compartidos", "burstable", "uso justo" = compartido.
+- 📊 Mira benchmarks independientes (vpsbenchmarks.com) que miden el steal real.
+- 🏷️ Nomenclatura: "dedicated vCPU", "CCX" (Hetzner), "Optimized" (Vultr), "RS / Root Server" (Netcup) = garantizado. "vCPU", "CX/CPX" (Hetzner shared), "Regular/VX1" = compartido.
+
+**Una vez dentro (forense):**
+```bash
+top        # mira la columna %st (steal)
+```
+- `%st` ≈ 0% sostenido → dedicado real.
+- `%st` 5-20%+ en peak → te están robando CPU (compartido sobrevendido).
+- Cross-check: corre `sysbench cpu` a distintas horas; resultados inconsistentes = steal.
+
+> **Ojo con la RAM:** en los planes "compartidos" la RAM y el disco normalmente **sí** son tuyos; lo que sobrevenden es el **CPU**. Por eso confunde: tienes tus 8 GB reales, pero tu CPU es prestado.
 
 ## 2. Comparación Hostinger vs Hetzner CCX23
 
