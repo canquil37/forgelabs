@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/bridge-test.sh\"",
-            "timeout": 10
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/tunix-wake.py\"",
+            "timeout": 15
           }
         ]
       }
