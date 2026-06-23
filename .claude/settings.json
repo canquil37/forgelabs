@@ -10,6 +10,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/tunix-sleep.py\"",
+            "timeout": 15
+          }
+        ]
+      }
     ]
   }
 }
